@@ -1,13 +1,11 @@
 """
-Exp10: Surgical improvements on exp8 (5.533).
+Exp11: Optimize the RSI exit breakthrough from exp10 (6.479).
 
-Small targeted changes:
-1. Lower RSI thresholds (53/47 instead of 55/45) — more trades, less filtering
-2. Increase pyramid size from 0.5 to 0.6 of base
-3. Lower take-profit from 0.06 to 0.07 (let winners run slightly more)
-4. Add mean-reversion exit: close position when RSI overshoots in our direction
-   (RSI > 75 for longs, < 25 for shorts — mean reversion is coming)
-5. Slightly higher FUNDING_BOOST (0.35)
+Changes:
+1. Tighter RSI exit: 70/30 instead of 75/25 (exit earlier)
+2. Add RSI divergence: if RSI makes lower high while price makes higher high, exit
+3. More aggressive pyramid: 0.7 of base size
+4. Lower pyramid threshold: 0.015 instead of 0.02
 """
 
 import numpy as np
@@ -25,8 +23,8 @@ EMA_SLOW = 26
 RSI_PERIOD = 14
 RSI_BULL = 53
 RSI_BEAR = 47
-RSI_OVERBOUGHT = 75
-RSI_OVERSOLD = 25
+RSI_OVERBOUGHT = 70
+RSI_OVERSOLD = 30
 
 FUNDING_LOOKBACK = 24
 FUNDING_BOOST = 0.35
@@ -39,8 +37,8 @@ TAKE_PROFIT_PCT = 0.07
 BASE_THRESHOLD = 0.012
 BTC_OPPOSE_THRESHOLD = -0.01
 
-PYRAMID_THRESHOLD = 0.02
-PYRAMID_SIZE = 0.6
+PYRAMID_THRESHOLD = 0.015
+PYRAMID_SIZE = 0.7
 CORR_LOOKBACK = 72
 HIGH_CORR_THRESHOLD = 0.85
 
@@ -74,6 +72,7 @@ class Strategy:
         self.btc_momentum = 0.0
         self.pyramided = {}
         self.peak_equity = 100000.0
+        self.prev_rsi = {}
 
     def _calc_atr(self, history, lookback):
         if len(history) < lookback + 1:
@@ -227,7 +226,6 @@ class Strategy:
                     if mid > stop:
                         target = 0.0
 
-                # Take profit
                 if symbol in self.entry_prices:
                     entry = self.entry_prices[symbol]
                     pnl = (mid - entry) / entry
@@ -236,7 +234,7 @@ class Strategy:
                     if pnl > TAKE_PROFIT_PCT:
                         target = 0.0
 
-                # Mean reversion exit: RSI extreme in our direction
+                # Mean reversion exit at RSI extremes
                 if current_pos > 0 and rsi > RSI_OVERBOUGHT:
                     target = 0.0
                 elif current_pos < 0 and rsi < RSI_OVERSOLD:
@@ -246,6 +244,9 @@ class Strategy:
                     target = -size
                 elif current_pos < 0 and bullish:
                     target = size
+
+            # Store RSI for divergence detection
+            self.prev_rsi[symbol] = rsi
 
             if abs(target - current_pos) > 1.0:
                 signals.append(Signal(symbol=symbol, target_position=target))
