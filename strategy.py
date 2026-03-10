@@ -1,11 +1,11 @@
 """
-Exp11: Optimize the RSI exit breakthrough from exp10 (6.479).
+Exp13: Build on exp11 (6.783).
 
 Changes:
-1. Tighter RSI exit: 70/30 instead of 75/25 (exit earlier)
-2. Add RSI divergence: if RSI makes lower high while price makes higher high, exit
-3. More aggressive pyramid: 0.7 of base size
-4. Lower pyramid threshold: 0.015 instead of 0.02
+1. Add MACD histogram as 5th signal (need 3/5 for entry)
+2. Higher base position 0.16 (DD headroom exists at 3.6%)
+3. Reduce funding boost to 0.25 (less noise)
+4. Tighter take-profit 0.06 (lock in more gains)
 """
 
 import numpy as np
@@ -26,14 +26,18 @@ RSI_BEAR = 47
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
 
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+
 FUNDING_LOOKBACK = 24
-FUNDING_BOOST = 0.35
-BASE_POSITION_PCT = 0.14
+FUNDING_BOOST = 0.25
+BASE_POSITION_PCT = 0.16
 VOL_LOOKBACK = 48
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 3.5
-TAKE_PROFIT_PCT = 0.07
+TAKE_PROFIT_PCT = 0.06
 BASE_THRESHOLD = 0.012
 BTC_OPPOSE_THRESHOLD = -0.01
 
@@ -72,7 +76,6 @@ class Strategy:
         self.btc_momentum = 0.0
         self.pyramided = {}
         self.peak_equity = 100000.0
-        self.prev_rsi = {}
 
     def _calc_atr(self, history, lookback):
         if len(history) < lookback + 1:
@@ -104,6 +107,16 @@ class Strategy:
         corr = np.corrcoef(btc_rets, eth_rets)[0, 1]
         return corr if not np.isnan(corr) else 0.5
 
+    def _calc_macd(self, closes):
+        if len(closes) < MACD_SLOW + MACD_SIGNAL + 5:
+            return 0.0
+        fast_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5):], MACD_FAST)
+        slow_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5):], MACD_SLOW)
+        macd_line = fast_ema - slow_ema
+        signal_line = ema(macd_line, MACD_SIGNAL)
+        histogram = macd_line[-1] - signal_line[-1]
+        return histogram
+
     def on_bar(self, bar_data, portfolio):
         signals = []
         equity = portfolio.equity if portfolio.equity > 0 else portfolio.cash
@@ -125,7 +138,7 @@ class Strategy:
             if symbol not in bar_data:
                 continue
             bd = bar_data[symbol]
-            if len(bd.history) < max(LONG_WINDOW, EMA_SLOW) + 1:
+            if len(bd.history) < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5) + 1:
                 continue
 
             closes = bd.history["close"].values
@@ -155,8 +168,14 @@ class Strategy:
             rsi_bull = rsi > RSI_BULL
             rsi_bear = rsi < RSI_BEAR
 
-            bull_votes = sum([mom_bull, vshort_bull, ema_bull, rsi_bull])
-            bear_votes = sum([mom_bear, vshort_bear, ema_bear, rsi_bear])
+            # MACD histogram
+            macd_hist = self._calc_macd(closes)
+            macd_bull = macd_hist > 0
+            macd_bear = macd_hist < 0
+
+            # 5 signals: need 3/5
+            bull_votes = sum([mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull])
+            bear_votes = sum([mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear])
 
             btc_confirm = True
             if symbol != "BTC":
@@ -234,7 +253,6 @@ class Strategy:
                     if pnl > TAKE_PROFIT_PCT:
                         target = 0.0
 
-                # Mean reversion exit at RSI extremes
                 if current_pos > 0 and rsi > RSI_OVERBOUGHT:
                     target = 0.0
                 elif current_pos < 0 and rsi < RSI_OVERSOLD:
@@ -244,9 +262,6 @@ class Strategy:
                     target = -size
                 elif current_pos < 0 and bullish:
                     target = size
-
-            # Store RSI for divergence detection
-            self.prev_rsi[symbol] = rsi
 
             if abs(target - current_pos) > 1.0:
                 signals.append(Signal(symbol=symbol, target_position=target))
