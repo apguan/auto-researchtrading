@@ -1,11 +1,10 @@
 """
-Multi-timeframe momentum with vol-regime adaptive sizing.
+Exp2: Multi-TF momentum + EMA crossover + funding carry overlay.
 
-Key ideas:
-1. Require momentum agreement across 12h, 24h, 48h windows
-2. Scale position size inversely with realized volatility
-3. ATR-based trailing stops instead of fixed stops
-4. Include SOL with lower weight for diversification
+Build on exp1 (2.962) by adding:
+1. EMA crossover as additional confirmation (reduces whipsaws)
+2. Funding rate carry overlay (bias toward collecting funding)
+3. Slightly wider ATR stops for fewer false exits
 """
 
 import numpy as np
@@ -14,21 +13,37 @@ from prepare import Signal, PortfolioState, BarData
 ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL"]
 SYMBOL_WEIGHTS = {"BTC": 0.40, "ETH": 0.35, "SOL": 0.25}
 
-# Momentum windows
+# Momentum
 SHORT_WINDOW = 12
 MED_WINDOW = 24
 LONG_WINDOW = 48
 MOMENTUM_THRESHOLD = 0.015
 
+# EMA
+EMA_FAST = 12
+EMA_SLOW = 26
+
+# Funding
+FUNDING_LOOKBACK = 24
+FUNDING_BOOST = 0.3  # 30% size boost when collecting funding
+
 # Position sizing
 BASE_POSITION_PCT = 0.12
 VOL_LOOKBACK = 48
-TARGET_VOL = 0.015  # target hourly vol
+TARGET_VOL = 0.015
 
 # Stops
 ATR_LOOKBACK = 24
-ATR_STOP_MULT = 3.0
+ATR_STOP_MULT = 3.5  # wider than exp1
 TAKE_PROFIT_PCT = 0.08
+
+def ema(values, span):
+    alpha = 2.0 / (span + 1)
+    result = np.empty_like(values, dtype=float)
+    result[0] = values[0]
+    for i in range(1, len(values)):
+        result[i] = alpha * values[i] + (1 - alpha) * result[i - 1]
+    return result
 
 class Strategy:
     def __init__(self):
@@ -60,7 +75,7 @@ class Strategy:
             if symbol not in bar_data:
                 continue
             bd = bar_data[symbol]
-            if len(bd.history) < LONG_WINDOW + 1:
+            if len(bd.history) < max(LONG_WINDOW, EMA_SLOW) + 1:
                 continue
 
             closes = bd.history["close"].values
@@ -71,14 +86,27 @@ class Strategy:
             ret_med = (closes[-1] - closes[-MED_WINDOW]) / closes[-MED_WINDOW]
             ret_long = (closes[-1] - closes[-LONG_WINDOW]) / closes[-LONG_WINDOW]
 
-            # Direction: all three must agree
+            # EMA crossover
+            ema_fast = ema(closes[-(EMA_SLOW+10):], EMA_FAST)
+            ema_slow = ema(closes[-(EMA_SLOW+10):], EMA_SLOW)
+            ema_bull = ema_fast[-1] > ema_slow[-1]
+            ema_bear = ema_fast[-1] < ema_slow[-1]
+
+            # Direction: momentum + EMA agreement
             bullish = (ret_short > MOMENTUM_THRESHOLD and
                        ret_med > MOMENTUM_THRESHOLD * 0.8 and
-                       ret_long > 0)
+                       ret_long > 0 and ema_bull)
             bearish = (ret_short < -MOMENTUM_THRESHOLD and
                        ret_med < -MOMENTUM_THRESHOLD * 0.8 and
-                       ret_long < 0)
+                       ret_long < 0 and ema_bear)
 
+            # Funding carry overlay
+            funding_rates = bd.history["funding_rate"].values[-FUNDING_LOOKBACK:]
+            avg_funding = np.mean(funding_rates) if len(funding_rates) >= FUNDING_LOOKBACK else 0.0
+            
+            # Funding boost: increase size when position collects funding
+            funding_mult = 1.0
+            
             # Vol-adaptive sizing
             realized_vol = self._calc_vol(closes, VOL_LOOKBACK)
             vol_scale = min(2.0, max(0.3, TARGET_VOL / realized_vol))
@@ -91,9 +119,15 @@ class Strategy:
             # Entry
             if current_pos == 0:
                 if bullish:
-                    target = size
+                    # Long collects when funding negative
+                    if avg_funding < 0:
+                        funding_mult = 1.0 + FUNDING_BOOST
+                    target = size * funding_mult
                 elif bearish:
-                    target = -size
+                    # Short collects when funding positive
+                    if avg_funding > 0:
+                        funding_mult = 1.0 + FUNDING_BOOST
+                    target = -size * funding_mult
             else:
                 # ATR trailing stop
                 atr = self._calc_atr(bd.history, ATR_LOOKBACK)
@@ -123,7 +157,7 @@ class Strategy:
                     if pnl > TAKE_PROFIT_PCT:
                         target = 0.0
 
-                # Re-entry: flip direction if signal reverses
+                # Flip on signal reversal
                 if current_pos > 0 and bearish:
                     target = -size
                 elif current_pos < 0 and bullish:
@@ -140,7 +174,6 @@ class Strategy:
                     self.peak_prices.pop(symbol, None)
                     self.atr_at_entry.pop(symbol, None)
                 elif (target > 0 and current_pos < 0) or (target < 0 and current_pos > 0):
-                    # Flipping direction
                     self.entry_prices[symbol] = mid
                     self.peak_prices[symbol] = mid
                     self.atr_at_entry[symbol] = self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
