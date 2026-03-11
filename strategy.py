@@ -222,7 +222,7 @@ class Strategy:
             if high_corr and symbol == "SOL":
                 weight *= 0.5
             mom_strength = abs(ret_short) / dyn_threshold
-            strength_scale = min(1.5, max(0.7, mom_strength * 0.5 + 0.5))
+            strength_scale = 1.0
             size = equity * BASE_POSITION_PCT * weight * vol_scale * strength_scale * dd_scale
 
             funding_rates = bd.history["funding_rate"].values[-FUNDING_LOOKBACK:]
