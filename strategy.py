@@ -1,12 +1,10 @@
 """
-Exp15: Focus on signal quality from exp13 (7.758).
+Exp32: Add Bollinger Band width as 6th signal for vol compression detection.
 
-Key insight: turnover penalty is binding. Need fewer, higher-quality trades.
-Changes:
-1. Require 4/5 signals instead of 3/5 (higher conviction entries)
-2. Add re-entry cooldown (don't re-enter same symbol within 6 bars)
-3. Wider take-profit 0.08 (hold longer, fewer exits)
-4. Keep position at 0.16 (sweet spot from exp13)
+Changes from exp28 (ATR 5.5, score 9.382):
+1. Add BB width signal: bullish when BB width is below median (compression = pending breakout)
+2. Keep MIN_VOTES at 4 but out of 6 signals now
+3. BB compression acts as a quality filter for entries
 """
 
 import numpy as np
@@ -31,6 +29,8 @@ MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
 
+BB_PERIOD = 20
+
 FUNDING_LOOKBACK = 24
 FUNDING_BOOST = 0.25
 BASE_POSITION_PCT = 0.16
@@ -51,7 +51,7 @@ DD_REDUCE_THRESHOLD = 0.04
 DD_REDUCE_SCALE = 0.5
 
 COOLDOWN_BARS = 6
-MIN_VOTES = 4  # out of 5
+MIN_VOTES = 4  # out of 6 now
 
 def ema(values, span):
     alpha = 2.0 / (span + 1)
@@ -72,6 +72,7 @@ def calc_rsi(closes, period):
     rs = avg_gain / max(avg_loss, 1e-10)
     return 100 - 100 / (1 + rs)
 
+
 class Strategy:
     def __init__(self):
         self.entry_prices = {}
@@ -80,7 +81,7 @@ class Strategy:
         self.btc_momentum = 0.0
         self.pyramided = {}
         self.peak_equity = 100000.0
-        self.exit_bar = {}  # track when we last exited
+        self.exit_bar = {}
         self.bar_count = 0
 
     def _calc_atr(self, history, lookback):
@@ -122,6 +123,25 @@ class Strategy:
         signal_line = ema(macd_line, MACD_SIGNAL)
         return macd_line[-1] - signal_line[-1]
 
+    def _calc_bb_width_pctile(self, closes, period):
+        """Calculate current BB width percentile over lookback."""
+        if len(closes) < period * 3:
+            return 50.0
+        # Calculate rolling BB width
+        widths = []
+        for i in range(period * 2, len(closes)):
+            window = closes[i-period:i]
+            sma = np.mean(window)
+            std = np.std(window)
+            width = (2 * std) / sma if sma > 0 else 0
+            widths.append(width)
+        if len(widths) < 2:
+            return 50.0
+        current_width = widths[-1]
+        # Percentile of current width
+        pctile = 100 * np.sum(np.array(widths) <= current_width) / len(widths)
+        return pctile
+
     def on_bar(self, bar_data, portfolio):
         signals = []
         equity = portfolio.equity if portfolio.equity > 0 else portfolio.cash
@@ -144,7 +164,7 @@ class Strategy:
             if symbol not in bar_data:
                 continue
             bd = bar_data[symbol]
-            if len(bd.history) < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5) + 1:
+            if len(bd.history) < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5, BB_PERIOD * 3) + 1:
                 continue
 
             closes = bd.history["close"].values
@@ -178,8 +198,12 @@ class Strategy:
             macd_bull = macd_hist > 0
             macd_bear = macd_hist < 0
 
-            bull_votes = sum([mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull])
-            bear_votes = sum([mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear])
+            # BB width: low percentile = compression = pending breakout
+            bb_pctile = self._calc_bb_width_pctile(closes, BB_PERIOD)
+            bb_compressed = bb_pctile < 40  # Below 40th percentile = compressed
+
+            bull_votes = sum([mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed])
+            bear_votes = sum([mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed])
 
             btc_confirm = True
             if symbol != "BTC":
@@ -191,7 +215,6 @@ class Strategy:
             bullish = bull_votes >= MIN_VOTES and btc_confirm
             bearish = bear_votes >= MIN_VOTES and btc_confirm
 
-            # Cooldown check
             in_cooldown = (self.bar_count - self.exit_bar.get(symbol, -999)) < COOLDOWN_BARS
 
             vol_scale = min(2.0, max(0.3, TARGET_VOL / realized_vol))
@@ -266,7 +289,6 @@ class Strategy:
                 elif current_pos < 0 and rsi < RSI_OVERSOLD:
                     target = 0.0
 
-                # Only flip with cooldown respected
                 if current_pos > 0 and bearish and not in_cooldown:
                     target = -size
                 elif current_pos < 0 and bullish and not in_cooldown:
