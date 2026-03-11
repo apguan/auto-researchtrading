@@ -217,7 +217,7 @@ class Strategy:
 
             in_cooldown = (self.bar_count - self.exit_bar.get(symbol, -999)) < COOLDOWN_BARS
 
-            vol_scale = min(2.0, max(0.3, TARGET_VOL / realized_vol))
+            vol_scale = 1.0
             weight = SYMBOL_WEIGHTS.get(symbol, 0.33)
             if high_corr and symbol == "SOL":
                 weight *= 0.5
