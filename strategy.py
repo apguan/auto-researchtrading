@@ -16,25 +16,25 @@ SYMBOL_WEIGHTS = {"BTC": 0.33, "ETH": 0.33, "SOL": 0.33}
 SHORT_WINDOW = 6
 MED_WINDOW = 12
 MED2_WINDOW = 24
-LONG_WINDOW = 48
-EMA_FAST = 12
+LONG_WINDOW = 36
+EMA_FAST = 7
 EMA_SLOW = 26
 RSI_PERIOD = 8
 RSI_BULL = 50
 RSI_BEAR = 50
-RSI_OVERBOUGHT = 70
-RSI_OVERSOLD = 30
+RSI_OVERBOUGHT = 69
+RSI_OVERSOLD = 31
 
-MACD_FAST = 12
-MACD_SLOW = 26
+MACD_FAST = 14
+MACD_SLOW = 23
 MACD_SIGNAL = 9
 
-BB_PERIOD = 10
+BB_PERIOD = 7
 
 FUNDING_LOOKBACK = 24
 FUNDING_BOOST = 0.0
 BASE_POSITION_PCT = 0.08
-VOL_LOOKBACK = 48
+VOL_LOOKBACK = 36
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
@@ -172,8 +172,8 @@ class Strategy:
 
             realized_vol = self._calc_vol(closes, VOL_LOOKBACK)
             vol_ratio = realized_vol / TARGET_VOL
-            dyn_threshold = BASE_THRESHOLD * (0.5 + vol_ratio * 0.5)
-            dyn_threshold = max(0.006, min(0.025, dyn_threshold))
+            dyn_threshold = BASE_THRESHOLD * (0.3 + vol_ratio * 0.7)
+            dyn_threshold = max(0.005, min(0.020, dyn_threshold))
 
             ret_vshort = (closes[-1] - closes[-SHORT_WINDOW]) / closes[-SHORT_WINDOW]
             ret_short = (closes[-1] - closes[-MED_WINDOW]) / closes[-MED_WINDOW]
@@ -182,8 +182,8 @@ class Strategy:
 
             mom_bull = ret_short > dyn_threshold
             mom_bear = ret_short < -dyn_threshold
-            vshort_bull = ret_vshort > dyn_threshold * 0.5
-            vshort_bear = ret_vshort < -dyn_threshold * 0.5
+            vshort_bull = ret_vshort > dyn_threshold * 0.7
+            vshort_bear = ret_vshort < -dyn_threshold * 0.7
 
             ema_fast_arr = ema(closes[-(EMA_SLOW+10):], EMA_FAST)
             ema_slow_arr = ema(closes[-(EMA_SLOW+10):], EMA_SLOW)
@@ -200,7 +200,7 @@ class Strategy:
 
             # BB width: low percentile = compression = pending breakout
             bb_pctile = self._calc_bb_width_pctile(closes, BB_PERIOD)
-            bb_compressed = bb_pctile < 85  # Below 40th percentile = compressed
+            bb_compressed = bb_pctile < 90  # Below 40th percentile = compressed
 
             bull_votes = sum([mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed])
             bear_votes = sum([mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed])

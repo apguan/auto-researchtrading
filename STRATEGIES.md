@@ -601,13 +601,180 @@ More permissive: BB width below 85th percentile = "compressed."
 Allows more entries through the BB filter gate.
 ```
 
-### exp102 — RSI 50/50 (KEEP, score 20.634) — FINAL BEST
+### exp102 — RSI 50/50 (KEEP, score 20.634)
 
 **Math change:**
 ```
 RSI_BULL = 50, RSI_BEAR = 50 (confirmed optimal from exp77)
-Final refinement. Score 20.634, Sharpe 20.634, DD 0.3%, 7605 trades.
+Score 20.634, Sharpe 20.634, DD 0.3%, 7605 trades.
 ```
+
+## Phase 7: Fine-Tuning the Ensemble (score 20.6 → 21.4)
+
+With the core strategy locked in, this phase swept every remaining parameter looking for marginal gains. ~150 experiments ran autonomously.
+
+### exp119 — BB Percentile 80 (KEEP, score 20.714)
+
+**Math change:**
+```
+BB_PERIOD = 8 (from 10, found in exp115)
+bb_compressed = (pctile < 80)  (re-tuned with new BB_PERIOD)
+```
+
+### exp123 — EMA 10/22 (KEEP, score 20.775)
+
+**Math change:**
+```
+EMA_FAST = 10  (from 12)
+EMA_SLOW = 22  (from 26)
+
+Faster EMA crossover responds quicker.
+EMA(10) vs EMA(22) instead of EMA(12) vs EMA(26).
+```
+
+### exp136 — VOL_LOOKBACK 36 (KEEP, score 20.794)
+
+**Math change:**
+```
+VOL_LOOKBACK = 36  (from 48)
+realized_vol = std(diff(ln(closes[-36:])))
+
+Shorter vol lookback → more responsive to recent volatility changes.
+```
+
+### exp140 — Vol Scaling 0.4+0.6 (KEEP, score 20.852)
+
+**Math change:**
+```
+dyn_threshold = BASE_THRESHOLD * (0.4 + vol_ratio * 0.6)
+                                  ↑ was 0.5    ↑ was 0.5
+
+Slightly more weight on vol_ratio, slightly lower floor.
+Threshold responds more to current volatility.
+```
+
+### exp145-153 — EMA_FAST Sweep 9→7, EMA_SLOW 24 (KEEP, score 20.865 → 20.924)
+
+**Math change:**
+```
+Swept EMA_FAST: 9 (20.865), 8 (20.875), 7 (20.899)
+  EMA_FAST 6 was worse (20.874). Sweet spot: 7.
+
+Then swept EMA_SLOW with EMA_FAST=7:
+  20 (20.577), 22 (tested), 24 (20.924 ← new best), 26 (pending)
+
+Final: EMA(7) vs EMA(24)
+  alpha_fast = 2/8 = 0.25  (very responsive)
+  alpha_slow = 2/25 = 0.08 (smooth trend)
+```
+
+### exp167 — BB Compression Threshold 90 (KEEP, score 20.957)
+
+**Math change:**
+```
+bb_compressed = (pctile < 90)  (from 80)
+
+Very permissive: only filters out the top 10% widest BB readings.
+In practice, BB compression votes "yes" most of the time,
+acting as a mild quality gate rather than a strong filter.
+```
+
+### exp186 — MACD_SLOW 22 (KEEP, score 20.995)
+
+**Math change:**
+```
+MACD_SLOW = 22  (from 26)
+MACD histogram = EMA(close, 12) - EMA(close, 22) - EMA(MACD_line, 9)
+
+Faster MACD slow EMA matches the faster EMA crossover (7/24).
+```
+
+### exp191 — EMA_SLOW 26 (KEEP, score 21.050)
+
+**Math change:**
+```
+EMA_SLOW = 26  (from 24, re-tested with other changes)
+With MACD_SLOW=22 and EMA_FAST=7, the wider EMA gap works better.
+```
+
+### exp200 — V-Short Mult 0.7 (KEEP, score 21.077)
+
+**Math change:**
+```
+vshort_bull = ret_6h > dyn_threshold * 0.7  (from 0.5)
+vshort_bear = ret_6h < -dyn_threshold * 0.7
+
+Higher threshold for v-short signal reduces false positives.
+```
+
+### exp205 — Vol Scaling 0.3+0.7 (KEEP, score 21.243)
+
+**Math change:**
+```
+dyn_threshold = BASE_THRESHOLD * (0.3 + vol_ratio * 0.7)
+                                  ↑ was 0.4    ↑ was 0.6
+dyn_threshold = clamp(dyn_threshold, 0.005, 0.020)
+
+Even more dynamic: lower floor (0.3 vs 0.4) means threshold adapts more
+to volatility. Floor/ceiling also tightened from [0.006, 0.025] to [0.005, 0.020].
+```
+
+### exp217 — MACD_FAST 14 (KEEP, score 21.249)
+
+**Math change:**
+```
+MACD_FAST = 14  (from 12)
+MACD histogram = EMA(close, 14) - EMA(close, 22) - EMA(MACD_line, 9)
+
+Narrower MACD gap (14 vs 22 instead of 12 vs 22).
+MACD becomes more of a convergence detector than divergence.
+```
+
+### exp225 — BB_PERIOD 7 (KEEP, score 21.347)
+
+**Math change:**
+```
+BB_PERIOD = 7  (from 8)
+BB width computed over 7-bar rolling window.
+7 hours of compression detection — very fast response.
+```
+
+### exp246 — MACD_SLOW 23 (KEEP, score 21.364)
+
+**Math change:**
+```
+MACD_SLOW = 23  (from 22)
+MACD histogram = EMA(close, 14) - EMA(close, 23) - EMA(MACD_line, 9)
+Marginal widening of MACD gap.
+```
+
+### exp251 — RSI Exit 69/31 (KEEP, score 21.402) — CURRENT BEST
+
+**Math change:**
+```
+RSI_OVERBOUGHT = 69  (from 70)
+RSI_OVERSOLD   = 31  (from 30)
+
+Exit longs 1 RSI point earlier (69 instead of 70).
+Exit shorts 1 RSI point earlier (31 instead of 30).
+Slightly earlier exits reduce drawdown on mean-reversion.
+Score 21.402, Sharpe 21.402, DD 0.3%, 7949 trades.
+```
+
+### Phase 7 Notable Discards
+
+| Experiment | Score | What Failed | Lesson |
+|-----------|-------|-------------|--------|
+| exp106 | 20.206 | BASE_THRESHOLD 0.015 | Higher threshold too restrictive |
+| exp109 | 16.786 | MIN_VOTES 3/6 | Too many entries, massive turnover |
+| exp112 | 16.847 | RSI_PERIOD 12 | Slower RSI much worse for hourly |
+| exp124 | 16.323 | MIN_VOTES 5/6 | Too restrictive, misses valid entries |
+| exp155-156 | 20.485-20.798 | Various MACD_FAST/SLOW | Most MACD tweaks were marginal |
+| exp162 | 20.346 | COOLDOWN_BARS 3 | Re-entry speed matters with fast RSI |
+| exp168 | 20.741 | BB threshold 95 | Too permissive, BB signal becomes meaningless |
+| exp170 | 20.403 | RSI exit 68/32 | One step too far, too many exits |
+| exp223-224 | 18.4-19.2 | Remove v-short signal | V-short momentum is essential to ensemble |
+| exp238 | 21.330 | Log returns for momentum | No improvement over simple returns |
 
 ---
 
@@ -629,7 +796,7 @@ Final refinement. Score 20.634, Sharpe 20.634, DD 0.3%, 7605 trades.
 
 ---
 
-## Final Strategy: Complete Mathematical Description
+## Final Strategy: Complete Mathematical Description (exp251, score 21.402)
 
 ### Parameters
 ```python
@@ -637,10 +804,16 @@ SYMBOLS     = ["BTC", "ETH", "SOL"]     # equal weight 0.33 each
 POSITION    = 0.08                       # 8% of equity per symbol
 ATR_MULT    = 5.5                        # trailing stop width
 RSI_PERIOD  = 8                          # fast RSI
-BB_PERIOD   = 10                         # BB width lookback
+RSI_OB/OS   = 69/31                     # overbought/oversold exit thresholds
+EMA_FAST    = 7                          # fast EMA period
+EMA_SLOW    = 26                         # slow EMA period
+MACD        = (14, 23, 9)               # fast, slow, signal
+BB_PERIOD   = 7                          # BB width lookback
+BB_THRESH   = 90                         # BB compression percentile threshold
 COOLDOWN    = 2                          # bars between exit and re-entry
 MIN_VOTES   = 4                          # out of 6 signals
 THRESHOLD   = 0.012                      # base momentum threshold
+VOL_LOOKBACK = 36                        # realized vol window
 ```
 
 ### Per-Bar Logic (for each symbol)
@@ -648,28 +821,28 @@ THRESHOLD   = 0.012                      # base momentum threshold
 **Step 1: Compute indicators**
 ```
 closes      = history["close"]
-realized_vol = std(diff(ln(closes[-48:])))
+realized_vol = std(diff(ln(closes[-36:])))
 vol_ratio    = realized_vol / 0.015
-dyn_thresh   = clamp(0.012 * (0.5 + vol_ratio * 0.5), 0.006, 0.025)
+dyn_thresh   = clamp(0.012 * (0.3 + vol_ratio * 0.7), 0.005, 0.020)
 
 ret_6h      = (closes[-1] - closes[-6]) / closes[-6]
 ret_12h     = (closes[-1] - closes[-12]) / closes[-12]
-ema_12      = EMA(closes, 12)[-1]
+ema_7       = EMA(closes, 7)[-1]
 ema_26      = EMA(closes, 26)[-1]
 rsi         = RSI(closes, 8)
-macd_hist   = MACD(closes, 12, 26, 9)
-bb_pctile   = BB_width_percentile(closes, 10)
+macd_hist   = MACD(closes, 14, 23, 9)
+bb_pctile   = BB_width_percentile(closes, 7)
 ```
 
 **Step 2: Vote**
 ```
-                        BULL condition          BEAR condition
-Signal 1 (Momentum):   ret_12h > dyn_thresh    ret_12h < -dyn_thresh
-Signal 2 (V-Short):    ret_6h > dyn_thresh/2   ret_6h < -dyn_thresh/2
-Signal 3 (EMA):        ema_12 > ema_26         ema_12 < ema_26
-Signal 4 (RSI):        rsi > 50                rsi < 50
-Signal 5 (MACD):       macd_hist > 0           macd_hist < 0
-Signal 6 (BB Comp):    bb_pctile < 85          bb_pctile < 85    ← SAME (neutral)
+                        BULL condition            BEAR condition
+Signal 1 (Momentum):   ret_12h > dyn_thresh      ret_12h < -dyn_thresh
+Signal 2 (V-Short):    ret_6h > dyn_thresh*0.7   ret_6h < -dyn_thresh*0.7
+Signal 3 (EMA):        ema_7 > ema_26            ema_7 < ema_26
+Signal 4 (RSI):        rsi > 50                  rsi < 50
+Signal 5 (MACD):       macd_hist > 0             macd_hist < 0
+Signal 6 (BB Comp):    bb_pctile < 90            bb_pctile < 90    ← SAME (neutral)
 
 bull_votes = sum(bull conditions)
 bear_votes = sum(bear conditions)
@@ -695,8 +868,8 @@ if no_position AND NOT in_cooldown:
                if close > trough + 5.5 * ATR(24): exit
 
 2. RSI Mean-Reversion Exit:
-   If long  AND RSI(8) > 70: exit
-   If short AND RSI(8) < 30: exit
+   If long  AND RSI(8) > 69: exit
+   If short AND RSI(8) < 31: exit
 
 3. Signal Flip (replaces exit + new entry in one step):
    If long  AND bearish AND NOT in_cooldown: target = -size  (flip to short)
