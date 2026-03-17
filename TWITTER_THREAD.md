@@ -1,158 +1,199 @@
-# Twitter Thread: Autoresearch Trading
+# Autoresearch Trading — How We Let AI Teach Itself to Trade
 
-## Tweet 1 (Hook)
-
-Inspired by @karpathy's autoresearch, we gave Claude a trading strategy and told it to never stop improving.
-
-251 experiments later, zero human intervention:
-
-Sharpe: 2.7 → 21.4
-Max drawdown: 7.6% → 0.3%
-Return: +130% on 9mo of hourly crypto
-
-The AI taught itself to be a quant. Thread:
-
-![Score Evolution](charts/1_score_evolution.png)
+> **TL;DR:** We gave an AI a simple trading strategy and let it run 251 experiments on its own — no human touching anything. It improved its own performance by 7.9x and, in the process, discovered that deleting its own "smart" features made it better. Everything is open source.
 
 ---
 
-## Tweet 2 (The Setup)
+## What is this?
 
-The loop is dead simple:
+Imagine giving a student a basic trading strategy and saying: *"Make this better. Try anything. If it works, keep it. If it doesn't, undo it. Don't stop."*
 
-1. Modify strategy.py
-2. Git commit
-3. Backtest against 9mo of BTC/ETH/SOL hourly data
-4. Score it (Sharpe-based with DD + turnover penalties)
-5. If better → keep. If worse → git reset --hard
-6. Repeat forever
+That's exactly what we did — except the student is Claude (an AI), and it ran **251 experiments in a row** without a single human telling it what to try next.
 
-RunPod A100. No human in the loop. Just pure evolutionary pressure.
+**The results:**
 
-![Before After](charts/2_before_after.png)
-
----
-
-## Tweet 3 (The Surprise)
-
-The biggest discovery wasn't what the AI added — it was what it removed.
-
-Phase 1-3: Built a complex ensemble. Pyramiding, funding carry, BTC lead-lag filters, correlation regime detection, vol-adaptive sizing...
-
-Phase 4: "The Great Simplification." It systematically deleted every clever feature. Each removal IMPROVED performance.
-
-Removing strength scaling alone: +1.7 Sharpe.
-
-![Simplification](charts/3_simplification.png)
+| Metric | Start | End | Change |
+|--------|-------|-----|--------|
+| Risk-adjusted return (Sharpe) | 2.7 | 21.4 | **7.9x better** |
+| Worst loss (max drawdown) | 7.6% | 0.3% | **96% smaller** |
+| Total profit | +42% | +130% | **3x more** |
 
 ---
 
-## Tweet 4 (Complexity Chart)
+## Tweet 1 — The Hook
 
-This is the chart that blew our minds.
+> We gave Claude a trading strategy and told it to never stop improving.
+>
+> 251 experiments later, zero human intervention:
+> - Risk-adjusted returns: 7.9x better
+> - Worst-case loss: dropped 96%
+> - Total profit: 3x higher
+>
+> The AI taught itself to trade. Here's how:
 
-Complexity went DOWN while performance went UP.
-
-The AI independently discovered what veteran quants know: most alpha comes from a few robust signals. Everything else is noise dressed up as sophistication.
-
-Uniform sizing > sophisticated sizing. Simple momentum > multi-timeframe confirmation.
-
-![Complexity vs Performance](charts/8_complexity_vs_performance.png)
-
----
-
-## Tweet 5 (The Killer Finding)
-
-The single biggest gain: changing RSI period from 14 to 8.
-
-+5 Sharpe points from one parameter.
-
-Why? RSI(14) was designed for daily bars in the 1970s. Hourly crypto moves faster. The AI figured this out through pure trial and error — no finance textbooks, no human intuition.
-
-![Top Discoveries](charts/6_top_discoveries.png)
+![Score Evolution — each dot is one experiment the AI ran on its own. Green = kept, red = discarded. The green line is the running best score climbing from 2.7 to 21.4.](charts/1_score_evolution.png)
 
 ---
 
-## Tweet 6 (Drawdown)
+## Tweet 2 — How It Works (Dead Simple)
 
-Max drawdown evolution is equally wild.
+> The AI runs a loop, forever:
+>
+> 1. Change the trading strategy code
+> 2. Test it against 9 months of real BTC, ETH, and SOL price data
+> 3. Score the result — did it make more money with less risk?
+> 4. **If better → keep the change. If worse → undo it.**
+> 5. Repeat
+>
+> No human in the loop. No one telling it what to try. Just trial and error at machine speed.
 
-Started at 7.6%. Ended at 0.3%.
+![Before vs After — the 4 key metrics showing how much the strategy improved from baseline to final.](charts/2_before_after.png)
 
-That's a 96% reduction in worst-case loss. The strategy went from "scary to trade" to "barely moves against you."
-
-The key: ATR trailing stops at 5.5x + RSI mean-reversion exits at 69/31. Let winners run, cut losers with surgical precision.
-
-![Drawdown Evolution](charts/4_drawdown_evolution.png)
-
----
-
-## Tweet 7 (Final Architecture)
-
-The final strategy the AI converged on is remarkably elegant:
-
-6 signals vote → need 4/6 agreement
-→ ATR trailing stop (5.5x)
-→ RSI mean-reversion exit
-→ Signal flip (never exit flat)
-
-Equal weight BTC/ETH/SOL. 8% position size. 2-bar cooldown.
-
-Every "smart" feature was tried, kept temporarily, then permanently removed.
-
-![Strategy Architecture](charts/7_strategy_architecture.png)
+*Think of it like evolution: random mutations, keep what survives, discard what doesn't. Except instead of millions of years, it took hours.*
 
 ---
 
-## Tweet 8 (Stats)
+## Tweet 3 — The Biggest Surprise
 
-By the numbers:
+> Here's what nobody expected:
+>
+> **The AI's biggest improvements came from DELETING features, not adding them.**
+>
+> First, the AI built a complex strategy — fancy position sizing, multi-market filters, correlation detection, drawdown adaptation...
+>
+> Then it started removing those features **one by one**. And every single removal made the strategy BETTER.
+>
+> The fanciest feature it removed? "Strength scaling" (adjusting trade size based on signal confidence). Removing it alone improved performance by +1.7 Sharpe.
 
-- 251 total experiments (104 in main results log)
-- 44 kept, 59 discarded (43% success rate)
-- 7 distinct phases of evolution
-- 9 features built then removed
-- Score improved 7.9x from baseline
-- Entire run: zero human intervention
+![The Great Simplification — every bar pair shows the score before and after removing a feature. Green (after) is higher every time.](charts/3_simplification.png)
 
-![Keep Discard](charts/5_keep_discard.png)
-
----
-
-## Tweet 9 (What This Means)
-
-What's happening in autoresearch right now:
-- @karpathy — optimizing LLM training
-- @hamostaf04 — evolving agent protocols
-- Gastown — 20-30 Claude Codes in parallel
-
-We're evolving domain knowledge. The AI isn't learning how to code better — it's learning how to be a better quant researcher through pure experimentation.
+*The AI independently learned what experienced traders already know: most clever tricks just add noise. The best strategies are simple.*
 
 ---
 
-## Tweet 10 (CTA)
+## Tweet 4 — The Mind-Blowing Chart
 
-Full evolution log with math for every single experiment is open source.
+> This chart tells the whole story:
+>
+> **As the strategy got SIMPLER, it got BETTER.**
+>
+> The red line (complexity) goes up as the AI builds features, then crashes down as it removes them. Meanwhile the green line (performance) keeps climbing.
+>
+> The crossover point — where the AI starts deleting its own work — is when performance explodes.
 
-251 experiments. Every keep, every discard, every lesson — all generated autonomously.
+![Complexity vs Performance — the red line (complexity) rises then falls, while the green line (score) keeps climbing. They cross during "The Great Simplification."](charts/8_complexity_vs_performance.png)
 
-[github.com/Nunchi-trade/auto-researchtrading](https://github.com/Nunchi-trade/auto-researchtrading)
-
-We're @nunchitrade. Building autonomous DeFi infrastructure on Hyperliquid.
+*Wall Street spends billions on complexity. The AI discovered that the opposite works better — at least for this problem.*
 
 ---
 
-## Chart → Tweet Pairing
+## Tweet 5 — The Single Biggest Discovery
 
-| Tweet | Chart |
-|-------|-------|
-| 1 (Hook) | ![](charts/1_score_evolution.png) |
-| 2 (Setup) | ![](charts/2_before_after.png) |
-| 3 (Simplification) | ![](charts/3_simplification.png) |
-| 4 (Complexity) | ![](charts/8_complexity_vs_performance.png) |
-| 5 (RSI Discovery) | ![](charts/6_top_discoveries.png) |
-| 6 (Drawdown) | ![](charts/4_drawdown_evolution.png) |
-| 7 (Architecture) | ![](charts/7_strategy_architecture.png) |
-| 8 (Stats) | ![](charts/5_keep_discard.png) |
-| 9 (Ecosystem) | Text only |
-| 10 (CTA) | Repo link |
+> One change added more performance than anything else:
+>
+> **Changing the RSI lookback period from 14 to 8.**
+>
+> That's it. One number. +5 Sharpe points.
+>
+> Why? RSI(14) is the textbook default — designed for daily stock charts in the 1970s. But we're trading hourly crypto in 2025. The market moves faster. The AI figured this out through pure experimentation — no finance degree needed.
+
+![Top 10 Discoveries — horizontal bars showing the biggest performance improvements. RSI period 8 dominates at +5.0 Sharpe.](charts/6_top_discoveries.png)
+
+*For non-traders: RSI measures whether an asset is "overbought" or "oversold." A shorter lookback (8 vs 14) makes it react faster to price changes — critical when you're looking at hourly candles instead of daily ones.*
+
+---
+
+## Tweet 6 — Risk Went to Nearly Zero
+
+> The strategy didn't just make more money — it got dramatically safer.
+>
+> **Max drawdown (the worst peak-to-trough loss) went from 7.6% to 0.3%.**
+>
+> That's a 96% reduction. The strategy went from "stomach-churning" to "barely flinches."
+>
+> How? Two key mechanisms the AI discovered:
+> - **Trailing stops** that adapt to market volatility (let winners run, cut losers early)
+> - **RSI-based exits** that take profit before a reversal hits (get out at the top)
+
+![Drawdown Evolution — the line drops from 7.6% to 0.3% across the kept experiments, showing risk shrinking over time.](charts/4_drawdown_evolution.png)
+
+*For non-traders: "drawdown" is the worst losing streak. A 7.6% drawdown means you'd see your $100K account drop to $92.4K at some point. At 0.3%, the worst dip is just $300.*
+
+---
+
+## Tweet 7 — The Final Strategy
+
+> After 251 experiments, here's what the AI converged on — remarkably elegant:
+>
+> **6 different signals each "vote" on whether to buy or sell.** The strategy only acts when 4 out of 6 agree.
+>
+> Then three exit rules protect profits (in priority order):
+> 1. **Trailing stop** — if price drops too far from the peak, exit
+> 2. **RSI exit** — if the asset looks overbought/oversold, take profit
+> 3. **Signal flip** — if signals reverse, flip the position immediately (never sit in cash)
+>
+> Equal exposure to BTC, ETH, and SOL. Small position sizes. Simple.
+
+![Strategy Architecture — a visual diagram showing the 6 input signals flowing into a 4/6 majority vote, then into exit conditions, with final performance stats at the bottom.](charts/7_strategy_architecture.png)
+
+*Every "smart" feature the AI tried — pyramiding, funding rate boosts, BTC lead-lag filters, variable position sizing — was eventually removed. The final strategy uses none of them.*
+
+---
+
+## Tweet 8 — By the Numbers
+
+> The full stats:
+>
+> - **251** total experiments run autonomously
+> - **44 kept**, 59 discarded (43% success rate)
+> - **7 phases** of evolution (build up → simplify → fine-tune)
+> - **9 features** built and then permanently removed
+> - **7.9x** overall improvement from start to finish
+> - **0** humans involved during the run
+
+![Experiment Outcomes — donut chart showing 43% kept vs 57% discarded, plus a histogram of score distribution.](charts/5_keep_discard.png)
+
+*More than half the experiments failed. That's the point — the AI explored aggressively, kept what worked, and threw away the rest. It's not about being right every time. It's about the direction of improvement.*
+
+---
+
+## Tweet 9 — Why This Matters
+
+> This is part of a bigger movement called **"autoresearch"** — letting AI run its own research loops:
+>
+> - Karpathy pioneered it for optimizing AI model training
+> - Others are using it to evolve how AI agents collaborate
+> - **We're using it to evolve trading strategies**
+>
+> The AI isn't learning to code better. It's learning to be a better **researcher** — forming hypotheses, testing them, and building on results. All autonomously.
+>
+> This is what happens when you give AI the scientific method and say "go."
+
+---
+
+## Tweet 10 — Open Source
+
+> Everything is open source — the full evolution log with math for every single experiment.
+>
+> 251 experiments. Every keep, every discard, every lesson learned. All generated autonomously.
+>
+> **[github.com/Nunchi-trade/auto-researchtrading](https://github.com/Nunchi-trade/auto-researchtrading)**
+>
+> We're [@nunchitrade](https://x.com/nunchitrade). Building autonomous DeFi infrastructure on Hyperliquid.
+
+---
+
+## Quick Reference: Chart Files
+
+All charts are in the [`charts/`](charts/) folder:
+
+| Tweet | Chart | What it shows |
+|-------|-------|---------------|
+| 1 | `1_score_evolution.png` | Every experiment plotted — the full journey from 2.7 to 21.4 |
+| 2 | `2_before_after.png` | Before/after comparison of the 4 key metrics |
+| 3 | `3_simplification.png` | Each feature removal and its impact on performance |
+| 4 | `8_complexity_vs_performance.png` | Complexity going down while performance goes up |
+| 5 | `6_top_discoveries.png` | The 10 biggest individual improvements ranked |
+| 6 | `4_drawdown_evolution.png` | Risk dropping from 7.6% to 0.3% over time |
+| 7 | `7_strategy_architecture.png` | Visual diagram of the final strategy |
+| 8 | `5_keep_discard.png` | Success rate and score distribution |
