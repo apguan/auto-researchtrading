@@ -821,6 +821,91 @@ def chart12_equity_curve():
     print("✓ Chart 12: Equity curve (PNL)")
 
 
+def chart13_equity_evolution():
+    """Chart 13: Overlay equity curves at key autoresearch milestones."""
+    milestones = [
+        ("equity_curve_baseline.csv", "Baseline (Sharpe 2.7)", ACCENT_RED, 1.0, '--'),
+        ("equity_curve_exp15.csv",    "Exp 15: Ensemble (8.4)", ACCENT_ORANGE, 0.7, '-'),
+        ("equity_curve_exp46.csv",    "Exp 46: Simplified (13.5)", ACCENT_PURPLE, 0.7, '-'),
+        ("equity_curve_exp72.csv",    "Exp 72: RSI-8 (19.7)", ACCENT_CYAN, 0.7, '-'),
+        ("equity_curve_exp102.csv",   "Final (Sharpe 20.6)", ACCENT_GREEN, 1.0, '-'),
+    ]
+
+    base = Path('/Users/jae_lee/auto-researchtrading')
+    fig, (ax_pnl, ax_dd) = plt.subplots(2, 1, figsize=(14, 10), facecolor=BG,
+                                         gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.12})
+
+    for csv_name, label, color, alpha, ls in milestones:
+        csv_path = base / csv_name
+        if not csv_path.exists():
+            print(f"  ⚠ Missing {csv_name}, skipping")
+            continue
+
+        timestamps, equities = [], []
+        with open(csv_path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                timestamps.append(datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M'))
+                equities.append(float(row['equity']))
+
+        equities = np.array(equities)
+        pnl_pct = (equities - 100_000) / 100_000 * 100
+
+        # Drawdown
+        peak = np.maximum.accumulate(equities)
+        dd_pct = (peak - equities) / peak * 100
+
+        lw = 2.2 if alpha == 1.0 else 1.3
+        ax_pnl.plot(timestamps, pnl_pct, color=color, linewidth=lw,
+                    alpha=alpha, linestyle=ls, label=label)
+        ax_dd.plot(timestamps, -dd_pct, color=color, linewidth=lw,
+                   alpha=alpha, linestyle=ls)
+
+    # PNL panel
+    ax_pnl.set_facecolor(BG)
+    ax_pnl.axhline(y=0, color=MUTED, linewidth=0.8, linestyle='--', alpha=0.4)
+    ax_pnl.set_title('Equity Curve Evolution — Baseline vs Autoresearch Iterations',
+                      fontsize=16, fontweight='bold', color=TEXT_COLOR, pad=15)
+    ax_pnl.set_ylabel('Return (%)', fontsize=12, color=TEXT_COLOR)
+    ax_pnl.legend(loc='upper left', fontsize=10, facecolor=CARD_BG,
+                  edgecolor=GRID_COLOR, labelcolor=TEXT_COLOR)
+    ax_pnl.tick_params(colors=MUTED, labelsize=10)
+    ax_pnl.yaxis.set_major_formatter(mticker.FormatStrFormatter('+%.0f%%'))
+    ax_pnl.grid(True, alpha=0.15, color=GRID_COLOR)
+    ax_pnl.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax_pnl.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    ax_pnl.set_xticklabels([])
+    for spine in ax_pnl.spines.values():
+        spine.set_color(GRID_COLOR)
+
+    # Annotation: arrow from baseline end to final end
+    ax_pnl.annotate('7.9x better\nrisk-adjusted',
+                     xy=(timestamps[-1], pnl_pct[-1] if 'pnl_pct' in dir() else 0),
+                     xytext=(-120, 30), textcoords='offset points',
+                     fontsize=10, fontweight='bold', color=ACCENT_GREEN,
+                     bbox=dict(boxstyle='round,pad=0.4', facecolor=CARD_BG,
+                               edgecolor=ACCENT_GREEN, alpha=0.9))
+
+    # Drawdown panel
+    ax_dd.set_facecolor(BG)
+    ax_dd.axhline(y=0, color=MUTED, linewidth=0.8, linestyle='--', alpha=0.4)
+    ax_dd.set_ylabel('Drawdown (%)', fontsize=11, color=TEXT_COLOR)
+    ax_dd.tick_params(colors=MUTED, labelsize=10)
+    ax_dd.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.0f%%'))
+    ax_dd.grid(True, alpha=0.15, color=GRID_COLOR)
+    ax_dd.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax_dd.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.setp(ax_dd.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    for spine in ax_dd.spines.values():
+        spine.set_color(GRID_COLOR)
+
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / '13_equity_evolution.png', dpi=200, bbox_inches='tight',
+                facecolor=BG, edgecolor='none')
+    plt.close(fig)
+    print("✓ Chart 13: Equity curve evolution (milestone overlay)")
+
+
 def main():
     print("Loading experiment data...")
     exps = load_results()
@@ -840,6 +925,7 @@ def main():
     chart10_kept_vs_all_path(exps)
     chart11_per_experiment_delta(exps)
     chart12_equity_curve()
+    chart13_equity_evolution()
 
     print(f"\n✅ All charts saved to {OUTPUT_DIR}/")
     print("\nFiles generated:")

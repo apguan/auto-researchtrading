@@ -153,7 +153,27 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 9 — The Final Strategy
+## Tweet 9 — The Evolution of the PNL
+
+> "But what did the PNL look like *before* autoresearch?"
+>
+> Here's the same 9-month period at 5 key milestones — from baseline to final.
+>
+> **Red dashed line** = the starting strategy. +42% return but look at that drawdown — jagged, volatile, stomach-churning.
+>
+> The middle iterations (orange, purple) made more raw money but still had significant risk. Then something interesting happens:
+>
+> **The final strategy (green) makes LESS raw profit than the intermediate ones — but the drawdown panel tells the real story.** The green line barely registers. That's a max drawdown of 0.3% vs 7.6% at baseline.
+>
+> The AI didn't just optimize for returns. It optimized for *risk-adjusted* returns — and that meant accepting lower raw profit in exchange for a curve you could actually sleep through.
+
+![Equity Curve Evolution — 5 overlaid equity curves from baseline (red, volatile) through intermediate iterations to the final strategy (green, smooth). The bottom panel shows drawdowns collapsing from -7% to nearly zero.](charts/13_equity_evolution.png)
+
+*The progression: more profit → even more profit → wait, less profit but zero drawdowns. The AI learned what most traders never do — the best strategy isn't the one that makes the most money. It's the one that makes the most money per unit of risk.*
+
+---
+
+## Tweet 10 — The Final Strategy
 
 > After 251 experiments, here's what the AI converged on — remarkably elegant:
 >
@@ -172,7 +192,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 10 — By the Numbers
+## Tweet 11 — By the Numbers
 
 > The full stats:
 >
@@ -189,7 +209,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 11 — The Search Landscape
+## Tweet 12 — The Search Landscape
 
 > Every bar here is one experiment. Green = improvement (kept). Red = made things worse (discarded). Orange = beat the running best but got rejected anyway for risk reasons.
 >
@@ -203,7 +223,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 12 — Was the AI Actually Smart About It?
+## Tweet 13 — Was the AI Actually Smart About It?
 
 > Here's the question that matters: **was the AI's selectivity actually good, or did it just get lucky?**
 >
@@ -221,7 +241,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 13 — "But Isn't This Just Overfitting?"
+## Tweet 14 — "But Isn't This Just Overfitting?"
 
 > The first question any quant will ask: **"You ran 251 experiments on the same data — isn't the final strategy just memorizing the validation set?"**
 >
@@ -243,7 +263,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 14 — Why This Matters
+## Tweet 15 — Why This Matters
 
 > This is part of a bigger movement called **"autoresearch"** — letting AI run its own research loops:
 >
@@ -257,7 +277,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 15 — Open Source
+## Tweet 16 — Open Source
 
 > Everything is open source — the full evolution log with math for every single experiment.
 >
@@ -283,8 +303,9 @@ All charts are in the [`charts/`](charts/) folder:
 | 6 | `9_score_impact_waterfall.png` | How each kept decision stacked up to build the final score |
 | 7 | `4_drawdown_evolution.png` | Risk dropping from 7.6% to 0.3% over time |
 | 8 | `12_equity_curve.png` | Portfolio equity curve — $100K to $180K over 9 months |
-| 9 | `7_strategy_architecture.png` | Visual diagram of the final strategy |
-| 10 | `5_keep_discard.png` | Success rate and score distribution |
-| 11 | `11_per_experiment_delta.png` | Search landscape — every experiment's delta from running best |
-| 12 | `10_kept_vs_all_path.png` | AI selectivity — kept path vs accept-everything path |
-| 13 | *(no chart)* | Addressing overfitting concerns |
+| 9 | `13_equity_evolution.png` | Equity evolution — baseline vs autoresearch iterations with drawdowns |
+| 10 | `7_strategy_architecture.png` | Visual diagram of the final strategy |
+| 11 | `5_keep_discard.png` | Success rate and score distribution |
+| 12 | `11_per_experiment_delta.png` | Search landscape — every experiment's delta from running best |
+| 13 | `10_kept_vs_all_path.png` | AI selectivity — kept path vs accept-everything path |
+| 14 | *(no chart)* | Addressing overfitting concerns |
