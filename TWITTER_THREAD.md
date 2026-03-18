@@ -137,7 +137,23 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 8 — The Final Strategy
+## Tweet 8 — Show Me the Money
+
+> "Okay, but what does the actual PNL look like?"
+>
+> Here it is. **$100K → $180K over 9 months.** +80% return with almost no visible drawdowns.
+>
+> Look at how smooth that curve is. No cliff drops. No gut-wrenching dips. Just steady, compounding gains from July 2024 through March 2025.
+>
+> This is what a 20+ Sharpe strategy looks like in practice — the risk-adjusted return is so high that the equity curve barely wiggles.
+
+![Portfolio Equity Curve — starting at $100K and climbing smoothly to $180K over 9 months with virtually no drawdowns.](charts/12_equity_curve.png)
+
+*For context: the S&P 500 returned ~23% in 2024. This strategy did 80% in 9 months — with a max drawdown of 0.3% vs the S&P's ~5%. (Caveat: this is backtested on the validation set, not live trading.)*
+
+---
+
+## Tweet 9 — The Final Strategy
 
 > After 251 experiments, here's what the AI converged on — remarkably elegant:
 >
@@ -156,7 +172,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 9 — By the Numbers
+## Tweet 10 — By the Numbers
 
 > The full stats:
 >
@@ -173,7 +189,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 10 — The Search Landscape
+## Tweet 11 — The Search Landscape
 
 > Every bar here is one experiment. Green = improvement (kept). Red = made things worse (discarded). Orange = beat the running best but got rejected anyway for risk reasons.
 >
@@ -187,7 +203,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 11 — Was the AI Actually Smart About It?
+## Tweet 12 — Was the AI Actually Smart About It?
 
 > Here's the question that matters: **was the AI's selectivity actually good, or did it just get lucky?**
 >
@@ -205,7 +221,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 12 — "But Isn't This Just Overfitting?"
+## Tweet 13 — "But Isn't This Just Overfitting?"
 
 > The first question any quant will ask: **"You ran 251 experiments on the same data — isn't the final strategy just memorizing the validation set?"**
 >
@@ -227,7 +243,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 13 — Why This Matters
+## Tweet 14 — Why This Matters
 
 > This is part of a bigger movement called **"autoresearch"** — letting AI run its own research loops:
 >
@@ -241,7 +257,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ---
 
-## Tweet 14 — Open Source
+## Tweet 15 — Open Source
 
 > Everything is open source — the full evolution log with math for every single experiment.
 >
@@ -266,8 +282,9 @@ All charts are in the [`charts/`](charts/) folder:
 | 5 | `6_top_discoveries.png` | The 10 biggest individual improvements ranked |
 | 6 | `9_score_impact_waterfall.png` | How each kept decision stacked up to build the final score |
 | 7 | `4_drawdown_evolution.png` | Risk dropping from 7.6% to 0.3% over time |
-| 8 | `7_strategy_architecture.png` | Visual diagram of the final strategy |
-| 9 | `5_keep_discard.png` | Success rate and score distribution |
-| 10 | `11_per_experiment_delta.png` | Search landscape — every experiment's delta from running best |
-| 11 | `10_kept_vs_all_path.png` | AI selectivity — kept path vs accept-everything path |
-| 12 | *(no chart)* | Addressing overfitting concerns |
+| 8 | `12_equity_curve.png` | Portfolio equity curve — $100K to $180K over 9 months |
+| 9 | `7_strategy_architecture.png` | Visual diagram of the final strategy |
+| 10 | `5_keep_discard.png` | Success rate and score distribution |
+| 11 | `11_per_experiment_delta.png` | Search landscape — every experiment's delta from running best |
+| 12 | `10_kept_vs_all_path.png` | AI selectivity — kept path vs accept-everything path |
+| 13 | *(no chart)* | Addressing overfitting concerns |

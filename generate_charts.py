@@ -8,7 +8,10 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import matplotlib.dates as mdates
 import numpy as np
+import csv
+from datetime import datetime
 from pathlib import Path
 
 # ─── Dark theme setup ───
@@ -727,6 +730,97 @@ def chart11_per_experiment_delta(exps):
     print("✓ Chart 11: Per-experiment delta")
 
 
+def chart12_equity_curve():
+    """Chart 12: Portfolio equity curve (PNL over time)."""
+    csv_path = Path('/Users/jae_lee/auto-researchtrading/equity_curve.csv')
+    if not csv_path.exists():
+        print("⚠ Skipping Chart 12: equity_curve.csv not found (run export_equity.py first)")
+        return
+
+    timestamps, equities = [], []
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            timestamps.append(datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M'))
+            equities.append(float(row['equity']))
+
+    equities = np.array(equities)
+    initial = equities[0]
+    pnl_pct = (equities - initial) / initial * 100
+
+    # Find max drawdown period for annotation
+    peak = np.maximum.accumulate(equities)
+    drawdown = (peak - equities) / peak * 100
+    max_dd_idx = np.argmax(drawdown)
+    max_dd_val = drawdown[max_dd_idx]
+
+    # Find peak before max drawdown
+    peak_idx = np.argmax(equities[:max_dd_idx + 1]) if max_dd_idx > 0 else 0
+
+    fig, ax = plt.subplots(figsize=(14, 6), facecolor=BG)
+    ax.set_facecolor(BG)
+
+    # Fill area under curve — green above starting equity, red below
+    ax.fill_between(timestamps, pnl_pct, 0,
+                    where=pnl_pct >= 0, color=ACCENT_GREEN, alpha=0.15)
+    ax.fill_between(timestamps, pnl_pct, 0,
+                    where=pnl_pct < 0, color=ACCENT_RED, alpha=0.15)
+
+    # Main equity line
+    ax.plot(timestamps, pnl_pct, color=ACCENT_GREEN, linewidth=1.5, alpha=0.9)
+
+    # Zero line
+    ax.axhline(y=0, color=MUTED, linewidth=0.8, linestyle='--', alpha=0.5)
+
+    # Annotate final value
+    final_pnl = pnl_pct[-1]
+    final_equity = equities[-1]
+    ax.annotate(f'+{final_pnl:.1f}%\n${final_equity:,.0f}',
+                xy=(timestamps[-1], final_pnl),
+                xytext=(-80, 20), textcoords='offset points',
+                fontsize=11, fontweight='bold', color=ACCENT_GREEN,
+                arrowprops=dict(arrowstyle='->', color=ACCENT_GREEN, lw=1.5),
+                bbox=dict(boxstyle='round,pad=0.4', facecolor=CARD_BG, edgecolor=ACCENT_GREEN, alpha=0.9))
+
+    # Annotate starting value
+    ax.annotate(f'$100K start',
+                xy=(timestamps[0], 0),
+                xytext=(60, -30), textcoords='offset points',
+                fontsize=9, color=MUTED,
+                arrowprops=dict(arrowstyle='->', color=MUTED, lw=1))
+
+    # Annotate max drawdown if visible
+    if max_dd_val > 0.5:
+        ax.annotate(f'Max DD: {max_dd_val:.1f}%',
+                    xy=(timestamps[max_dd_idx], pnl_pct[max_dd_idx]),
+                    xytext=(40, -25), textcoords='offset points',
+                    fontsize=9, color=ACCENT_ORANGE,
+                    arrowprops=dict(arrowstyle='->', color=ACCENT_ORANGE, lw=1),
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor=CARD_BG, edgecolor=ACCENT_ORANGE, alpha=0.8))
+
+    ax.set_title('Portfolio Equity Curve — $100K Starting Capital',
+                 fontsize=16, fontweight='bold', color=TEXT_COLOR, pad=15)
+    ax.set_ylabel('Return (%)', fontsize=12, color=TEXT_COLOR)
+    ax.set_xlabel('', fontsize=12, color=TEXT_COLOR)
+
+    # Format x-axis dates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+    ax.tick_params(colors=MUTED, labelsize=10)
+    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('+%.0f%%'))
+    ax.grid(True, alpha=0.15, color=GRID_COLOR)
+    for spine in ax.spines.values():
+        spine.set_color(GRID_COLOR)
+
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / '12_equity_curve.png', dpi=200, bbox_inches='tight',
+                facecolor=BG, edgecolor='none')
+    plt.close(fig)
+    print("✓ Chart 12: Equity curve (PNL)")
+
+
 def main():
     print("Loading experiment data...")
     exps = load_results()
@@ -745,6 +839,7 @@ def main():
     chart9_score_impact_waterfall(exps)
     chart10_kept_vs_all_path(exps)
     chart11_per_experiment_delta(exps)
+    chart12_equity_curve()
 
     print(f"\n✅ All charts saved to {OUTPUT_DIR}/")
     print("\nFiles generated:")
