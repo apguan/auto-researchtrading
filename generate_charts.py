@@ -385,7 +385,7 @@ def chart7_final_strategy_architecture():
     ax.axis('off')
 
     # Title
-    ax.text(50, 96, 'Final Strategy Architecture (exp251, Score 21.4)',
+    ax.text(50, 96, 'Final Strategy Architecture (exp103, Score 21.4)',
             ha='center', va='top', fontsize=20, color='white', fontweight='bold')
     ax.text(50, 92, 'BTC / ETH / SOL  •  Hourly  •  Equal Weight  •  8% Position Size',
             ha='center', va='top', fontsize=12, color=MUTED)

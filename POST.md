@@ -1,6 +1,6 @@
 Inspired by Karpathy's autoresearch, I let Claude self-evolve trading strategies on Hyperliquid perps—not tweaking one parameter, but autonomously discovering, testing, and discarding entire strategy architectures.
 
-**251 fully automated experiments, zero human intervention:**
+**103 fully automated experiments, zero human intervention:**
 - Score: 2.724 → 21.402 (7.9x improvement)
 - Sharpe ratio: 2.7 → 21.4
 - Max drawdown: 7.6% → 0.3%
@@ -41,6 +41,6 @@ Every "smart" feature—pyramiding, funding carry, BTC lead-lag, correlation fil
 - Strategies that evolve differently for each asset based on its characteristics
 - Eventually: strategies too complex for humans to design, but empirically validated through thousands of automated backtests
 
-The full evolution log with math for every strategy is open source. 251 experiments, every keep, every discard, every lesson learned—all generated autonomously.
+The full evolution log with math for every strategy is open source. 103 experiments, every keep, every discard, every lesson learned—all generated autonomously.
 
 Score 2.724 → 21.402. The AI taught itself to be a quant.

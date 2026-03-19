@@ -1,6 +1,6 @@
 # Autoresearch Trading — How We Let AI Teach Itself to Trade
 
-> **TL;DR:** We gave an AI a simple trading strategy and let it run 251 experiments on its own — no human touching anything. It improved its own performance by 7.9x and, in the process, discovered that deleting its own "smart" features made it better. Everything is open source.
+> **TL;DR:** We gave an AI a simple trading strategy and let it run 103 scored experiments on its own — no human touching anything. It improved its own performance by 7.9x and, in the process, discovered that deleting its own "smart" features made it better. Everything is open source.
 
 ---
 
@@ -8,7 +8,7 @@
 
 Imagine giving a student a basic trading strategy and saying: *"Make this better. Try anything. If it works, keep it. If it doesn't, undo it. Don't stop."*
 
-That's exactly what we did — except the student is Claude (an AI), and it ran **251 experiments in a row** without a single human telling it what to try next.
+That's exactly what we did — except the student is Claude (an AI), and it ran **103 experiments in a row** without a single human telling it what to try next.
 
 **The results:**
 
@@ -24,7 +24,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 > We gave Claude a trading strategy and told it to never stop improving.
 >
-> 251 experiments later, zero human intervention:
+> 103 experiments later, zero human intervention:
 > - Risk-adjusted returns: 7.9x better
 > - Worst-case loss: dropped 96%
 > - Total profit: 3x higher
@@ -175,7 +175,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ## Tweet 10 — The Final Strategy
 
-> After 251 experiments, here's what the AI converged on — remarkably elegant:
+> After 103 experiments, here's what the AI converged on — remarkably elegant:
 >
 > **6 different signals each "vote" on whether to buy or sell.** The strategy only acts when 4 out of 6 agree.
 >
@@ -196,14 +196,14 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 > The full stats:
 >
-> - **251** total experiments run autonomously
-> - **44 kept**, 59 discarded (43% success rate)
+> - **103** total experiments run and scored autonomously
+> - **44 kept**, 59 discarded (43% keep rate)
 > - **7 phases** of evolution (build up → simplify → fine-tune)
 > - **9 features** built and then permanently removed
 > - **7.9x** overall improvement from start to finish
 > - **0** humans involved during the run
 
-![Experiment Outcomes — donut chart showing 43% kept vs 57% discarded, plus a histogram of score distribution.](charts/5_keep_discard.png)
+![Experiment Outcomes — donut chart showing 44 kept (43%) vs 59 discarded (57%) out of 103 scored experiments, plus a histogram of score distribution.](charts/5_keep_discard.png)
 
 *More than half the experiments failed. That's the point — the AI explored aggressively, kept what worked, and threw away the rest. It's not about being right every time. It's about the direction of improvement.*
 
@@ -217,7 +217,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 >
 > Meanwhile, the green bars get smaller over time. Finding improvements gets harder as the strategy matures — but the AI kept finding them.
 
-![Search Landscape — bar chart showing every experiment's delta from the running best. 43 green bars above zero (kept), 59 red bars below (discarded), 1 orange bar (beat best but discarded for risk).](charts/11_per_experiment_delta.png)
+![Search Landscape — bar chart showing every experiment's delta from the running best. 44 green bars above zero (kept), 59 red bars below (discarded). 103 experiments total.](charts/11_per_experiment_delta.png)
 
 *This is what the "search space" of trading strategies looks like. Mostly failures. A few winners. And one interesting outlier the AI was smart enough to reject despite a higher score — because the risk profile was wrong.*
 
@@ -243,7 +243,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 ## Tweet 14 — "But Isn't This Just Overfitting?"
 
-> The first question any quant will ask: **"You ran 251 experiments on the same data — isn't the final strategy just memorizing the validation set?"**
+> The first question any quant will ask: **"You ran 103 experiments on the same data — isn't the final strategy just memorizing the validation set?"**
 >
 > Fair question. Here's why we think the risk is lower than it looks:
 >
@@ -251,7 +251,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 > Overfitting looks like adding parameters until the model memorizes noise. This AI did the opposite — it deleted 9 features and ended up with fewer parameters than it started with. That's regularization by instinct.
 >
 > **2. There's a held-out test set that was NEVER touched.**
-> The data is split into three periods: Train (Jun '23–Jun '24), Validation (Jul '24–Mar '25), and Test (Apr '25–Dec '25). All 251 experiments ran on the validation window only. The test set was explicitly forbidden — the AI was never allowed to peek at it.
+> The data is split into three periods: Train (Jun '23–Jun '24), Validation (Jul '24–Mar '25), and Test (Apr '25–Dec '25). All 103 experiments ran on the validation window only. The test set was explicitly forbidden — the AI was never allowed to peek at it.
 >
 > **3. The scoring function penalizes complexity.**
 > The composite score isn't just Sharpe ratio — it includes drawdown penalties and turnover penalties. Strategies that "cheat" by over-trading or taking concentrated bets get punished.
@@ -281,7 +281,7 @@ That's exactly what we did — except the student is Claude (an AI), and it ran 
 
 > Everything is open source — the full evolution log with math for every single experiment.
 >
-> 251 experiments. Every keep, every discard, every lesson learned. All generated autonomously.
+> 103 experiments. Every keep, every discard, every lesson learned. All generated autonomously.
 >
 > **[github.com/Nunchi-trade/auto-researchtrading](https://github.com/Nunchi-trade/auto-researchtrading)**
 >
