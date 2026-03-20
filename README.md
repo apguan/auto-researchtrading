@@ -19,7 +19,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/experiments-103-C9A84C" alt="Experiments" />
-  <img src="https://img.shields.io/badge/sharpe-21.4-brightgreen" alt="Sharpe" />
   <img src="https://img.shields.io/badge/max%20drawdown-0.3%25-brightgreen" alt="Drawdown" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
 </p>
