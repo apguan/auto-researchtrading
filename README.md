@@ -1,6 +1,156 @@
 # auto-researchtrading
 
-Autonomous trading strategy research on Hyperliquid perpetual futures, using Karpathy's autoresearch pattern for strategy discovery.
+Autonomous trading strategy research on Hyperliquid perpetual futures, using [Karpathy's autoresearch pattern](https://github.com/karpathy/autoresearch) for strategy discovery. An AI agent autonomously modifies `strategy.py`, backtests each change, and keeps only improvements — no human intervention required.
+
+## Quickstart
+
+### Prerequisites
+
+- **Python 3.10+**
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
+
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Setup
+
+```bash
+git clone https://github.com/Nunchi-trade/auto-researchtrading.git
+cd auto-researchtrading
+
+# Download historical data (BTC, ETH, SOL hourly OHLCV + funding rates)
+# Data is cached to ~/.cache/autotrader/data/ — only needs to run once
+uv run prepare.py
+```
+
+No API keys are required. Data is fetched from public CryptoCompare and Hyperliquid APIs.
+
+### Run a Backtest
+
+```bash
+# Run the current strategy against validation data
+uv run backtest.py
+```
+
+Output:
+
+```
+score:              20.634000
+sharpe:             20.634000
+total_return_pct:   130.000000
+max_drawdown_pct:   0.300000
+num_trades:         7605
+...
+```
+
+### Run All Benchmarks
+
+```bash
+# Compare 5 reference strategies against each other
+uv run run_benchmarks.py
+```
+
+## Running Your Own Experiments
+
+### The Rules
+
+- **Only edit `strategy.py`** — this is the single mutable file
+- **Do not modify** `prepare.py`, `backtest.py`, or anything in `benchmarks/`
+- **No new dependencies** — only `numpy`, `pandas`, `scipy`, `requests`, `pyarrow`, and stdlib
+- **Time budget:** 120 seconds per backtest
+
+### Manual Experiment Loop
+
+```bash
+# 1. Create a branch for your experiments
+git checkout -b autotrader/myexp
+
+# 2. Edit strategy.py with your idea
+#    (modify parameters, signals, entry/exit logic, etc.)
+
+# 3. Run the backtest
+uv run backtest.py
+
+# 4. If score improved → keep it
+git add strategy.py && git commit -m "exp1: description of change"
+
+# 5. If score got worse → revert
+git reset --hard HEAD~1
+```
+
+### Autonomous Experiment Loop (with Claude Code)
+
+The intended workflow uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the `/autoresearch` skill to run experiments autonomously:
+
+```bash
+# From the repo root, start Claude Code
+claude
+
+# Then run the autoresearch skill
+/autoresearch
+```
+
+The agent will:
+1. Read the current strategy and scores
+2. Propose and implement a modification to `strategy.py`
+3. Run `uv run backtest.py` and parse the score
+4. Keep the change if score improved, revert if not
+5. Repeat indefinitely until interrupted
+
+See `program.md` for detailed instructions on guiding the autonomous loop.
+
+### Strategy Interface
+
+Your strategy must implement a `Strategy` class in `strategy.py`:
+
+```python
+class Strategy:
+    def __init__(self):
+        # Initialize any tracking state
+        pass
+
+    def on_bar(self, bar_data: dict, portfolio: PortfolioState) -> list[Signal]:
+        """
+        Called once per hourly bar across all symbols.
+
+        Args:
+            bar_data: dict of symbol → BarData
+                - BarData.close, .open, .high, .low, .volume, .funding_rate
+                - BarData.history: DataFrame of last 500 bars
+            portfolio: PortfolioState
+                - portfolio.cash: available cash
+                - portfolio.positions: dict of symbol → signed USD notional
+
+        Returns:
+            List of Signal(symbol, target_position, order_type="market")
+            target_position is signed USD notional (+long, -short, 0=close)
+        """
+        return []
+```
+
+### Scoring
+
+```
+score = sharpe × √(min(trades/50, 1.0)) − drawdown_penalty − turnover_penalty
+```
+
+- `sharpe = mean(daily_returns) / std(daily_returns) × √365`
+- `drawdown_penalty = max(0, max_drawdown_pct − 15) × 0.05`
+- `turnover_penalty = max(0, annual_turnover/capital − 500) × 0.001`
+- Hard cutoffs (score = −999): fewer than 10 trades, drawdown > 50%, lost > 50% of capital
+
+### Data Available
+
+| Field | Description |
+|-------|-------------|
+| `bar_data[symbol].history` | DataFrame of last 500 hourly bars |
+| Columns | `timestamp`, `open`, `high`, `low`, `close`, `volume`, `funding_rate` |
+| Symbols | BTC, ETH, SOL |
+| Validation period | 2024-07-01 to 2025-03-31 |
+| Initial capital | $100,000 |
+| Fees | 2 bps maker, 5 bps taker, 1 bps slippage |
 
 ## Results
 
@@ -61,26 +211,17 @@ The strongest gains came from *removing* complexity, not adding it. Features tha
 - `ATR_STOP_MULT = 5.5` — Wide trailing stop to let winners run
 - Dynamic momentum threshold adapts to realized volatility
 
-## Autoresearch (LLM Training)
-
-Separate experiment optimizing Karpathy's GPT pretraining script.
-
-**Best result:** `val_bpb = 1.044` (from baseline 1.102)
-- Key finding: `WARMUP_RATIO = 0.05` significantly improves training
-
-## Data
-
-- BTC, ETH, SOL hourly OHLCV + funding rates from Hyperliquid
-- Validation period: 2024-07-01 to 2025-03-31
-- 500-bar history buffer per symbol
-
-## Scoring Formula
+## Project Structure
 
 ```
-score = sharpe * sqrt(min(trades/50, 1.0)) - drawdown_penalty - turnover_penalty
-drawdown_penalty = max(0, max_drawdown_pct - 15) * 0.05
-turnover_penalty = max(0, annual_turnover/capital - 500) * 0.001
-Hard cutoffs: <10 trades → -999, >50% drawdown → -999, lost >50% → -999
+├── strategy.py          # The only file you edit — your strategy lives here
+├── backtest.py          # Entry point — runs one backtest (fixed, do not modify)
+├── prepare.py           # Data download + backtest engine (fixed, do not modify)
+├── run_benchmarks.py    # Run all 5 benchmark strategies
+├── benchmarks/          # 5 reference strategies for comparison
+├── program.md           # Detailed instructions for the autonomous loop
+├── STRATEGIES.md        # Complete evolution log of all 103 experiments
+└── charts/              # Visualization PNGs of experiment progression
 ```
 
 ## Branches
