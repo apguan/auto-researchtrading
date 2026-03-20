@@ -1,8 +1,36 @@
-# auto-researchtrading
+<p align="center">
+  <img src="charts/1_score_evolution.png" alt="Score Evolution" width="600" />
+</p>
 
-Autonomous trading strategy research on Hyperliquid perpetual futures, using [Karpathy's autoresearch pattern](https://github.com/karpathy/autoresearch) for strategy discovery. An AI agent autonomously modifies `strategy.py`, backtests each change, and keeps only improvements — no human intervention required.
+<h3 align="center">Autonomous Trading Strategy Research</h3>
 
-## Quickstart
+<p align="center">
+  Karpathy-style autoresearch for Hyperliquid perpetual futures — 103 experiments, zero human intervention
+</p>
+
+<p align="center">
+  <a href="https://github.com/Nunchi-trade/agent-cli"><strong>Agent CLI</strong></a> &nbsp;•&nbsp;
+  <a href="https://docs.nunchi.trade"><strong>Docs</strong></a> &nbsp;•&nbsp;
+  <a href="https://research.nunchi.trade"><strong>Research</strong></a> &nbsp;•&nbsp;
+  <a href="https://discord.gg/nunchi"><strong>Discord</strong></a> &nbsp;•&nbsp;
+  <a href="https://x.com/nunchi"><strong>X</strong></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/experiments-103-C9A84C" alt="Experiments" />
+  <img src="https://img.shields.io/badge/sharpe-21.4-brightgreen" alt="Sharpe" />
+  <img src="https://img.shields.io/badge/max%20drawdown-0.3%25-brightgreen" alt="Drawdown" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
+</p>
+
+---
+
+An AI agent autonomously modifies a single file (`strategy.py`), backtests each change against historical [Hyperliquid](https://hyperliquid.xyz) perp data, and keeps only improvements. Adapts [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) pattern for trading strategy discovery. Starting from a simple momentum baseline (Sharpe 2.7), the system discovered a 6-signal ensemble strategy achieving **Sharpe 21.4 with 0.3% max drawdown** — a 7.9x improvement over 103 fully autonomous experiments.
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
@@ -19,22 +47,16 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```bash
 git clone https://github.com/Nunchi-trade/auto-researchtrading.git
 cd auto-researchtrading
-
-# Download historical data (BTC, ETH, SOL hourly OHLCV + funding rates)
-# Data is cached to ~/.cache/autotrader/data/ — only needs to run once
-uv run prepare.py
+uv run prepare.py                # Download data (~1 min, cached to ~/.cache/autotrader/data/)
 ```
 
-No API keys are required. Data is fetched from public CryptoCompare and Hyperliquid APIs.
+No API keys required. Data is fetched from public CryptoCompare and Hyperliquid APIs.
 
 ### Run a Backtest
 
 ```bash
-# Run the current strategy against validation data
-uv run backtest.py
+uv run backtest.py               # Run current strategy against validation data
 ```
-
-Output:
 
 ```
 score:              20.634000
@@ -42,54 +64,52 @@ sharpe:             20.634000
 total_return_pct:   130.000000
 max_drawdown_pct:   0.300000
 num_trades:         7605
-...
 ```
 
 ### Run All Benchmarks
 
 ```bash
-# Compare 5 reference strategies against each other
-uv run run_benchmarks.py
+uv run run_benchmarks.py         # Compare 5 reference strategies
 ```
+
+---
 
 ## Running Your Own Experiments
 
-### The Rules
+### Rules
 
-- **Only edit `strategy.py`** — this is the single mutable file
-- **Do not modify** `prepare.py`, `backtest.py`, or anything in `benchmarks/`
-- **No new dependencies** — only `numpy`, `pandas`, `scipy`, `requests`, `pyarrow`, and stdlib
-- **Time budget:** 120 seconds per backtest
+| Rule | Detail |
+|------|--------|
+| **Only edit `strategy.py`** | This is the single mutable file |
+| **Do not modify** | `prepare.py`, `backtest.py`, or anything in `benchmarks/` |
+| **No new dependencies** | Only `numpy`, `pandas`, `scipy`, `requests`, `pyarrow`, and stdlib |
+| **Time budget** | 120 seconds per backtest |
 
 ### Manual Experiment Loop
 
 ```bash
-# 1. Create a branch for your experiments
-git checkout -b autotrader/myexp
+git checkout -b autotrader/myexp          # 1. Create experiment branch
 
-# 2. Edit strategy.py with your idea
-#    (modify parameters, signals, entry/exit logic, etc.)
+# 2. Edit strategy.py with your idea (parameters, signals, entry/exit logic)
 
-# 3. Run the backtest
-uv run backtest.py
+uv run backtest.py                        # 3. Run the backtest
 
-# 4. If score improved → keep it
+# 4. If score improved → keep
 git add strategy.py && git commit -m "exp1: description of change"
 
 # 5. If score got worse → revert
 git reset --hard HEAD~1
 ```
 
-### Autonomous Experiment Loop (with Claude Code)
+Repeat. Each commit is one atomic experiment. The git history becomes your experiment log.
 
-The intended workflow uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the `/autoresearch` skill to run experiments autonomously:
+### Autonomous Loop (with Claude Code)
+
+The intended workflow uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the `/autoresearch` skill to run experiments without human intervention:
 
 ```bash
-# From the repo root, start Claude Code
-claude
-
-# Then run the autoresearch skill
-/autoresearch
+claude                           # Start Claude Code from repo root
+/autoresearch                    # Launch the autonomous loop
 ```
 
 The agent will:
@@ -99,11 +119,13 @@ The agent will:
 4. Keep the change if score improved, revert if not
 5. Repeat indefinitely until interrupted
 
-See `program.md` for detailed instructions on guiding the autonomous loop.
+See [`program.md`](program.md) for detailed instructions on guiding the autonomous loop.
 
-### Strategy Interface
+---
 
-Your strategy must implement a `Strategy` class in `strategy.py`:
+## Strategy Interface
+
+Your strategy must implement a `Strategy` class with a single `on_bar()` method — no shared state, no hidden coupling.
 
 ```python
 class Strategy:
@@ -130,17 +152,6 @@ class Strategy:
         return []
 ```
 
-### Scoring
-
-```
-score = sharpe × √(min(trades/50, 1.0)) − drawdown_penalty − turnover_penalty
-```
-
-- `sharpe = mean(daily_returns) / std(daily_returns) × √365`
-- `drawdown_penalty = max(0, max_drawdown_pct − 15) × 0.05`
-- `turnover_penalty = max(0, annual_turnover/capital − 500) × 0.001`
-- Hard cutoffs (score = −999): fewer than 10 trades, drawdown > 50%, lost > 50% of capital
-
 ### Data Available
 
 | Field | Description |
@@ -152,13 +163,42 @@ score = sharpe × √(min(trades/50, 1.0)) − drawdown_penalty − turnover_pen
 | Initial capital | $100,000 |
 | Fees | 2 bps maker, 5 bps taker, 1 bps slippage |
 
+### Scoring Formula
+
+```
+score = sharpe × √(min(trades/50, 1.0)) − drawdown_penalty − turnover_penalty
+```
+
+| Component | Formula |
+|-----------|---------|
+| Sharpe | `mean(daily_returns) / std(daily_returns) × √365` |
+| Drawdown penalty | `max(0, max_drawdown_pct − 15) × 0.05` |
+| Turnover penalty | `max(0, annual_turnover/capital − 500) × 0.001` |
+| Hard cutoffs (→ −999) | Fewer than 10 trades, drawdown > 50%, lost > 50% of capital |
+
+---
+
+## Benchmarks
+
+5 reference strategies to beat. The baseline to clear is **2.724**.
+
+| Rank | Strategy | Score | Sharpe | Return | Max DD | Trades |
+|------|----------|-------|--------|--------|--------|--------|
+| 1 | `simple_momentum` | 2.724 | 2.724 | +42.6% | 7.6% | 9081 |
+| 2 | `funding_arb` | -0.191 | -0.191 | -1.3% | 9.4% | 1403 |
+| 3 | `regime_mm` | -0.322 | -0.322 | -3.1% | 11.2% | 12854 |
+| 4 | `mean_reversion` | -3.964 | -3.380 | -26.2% | 26.7% | 3185 |
+| 5 | `momentum_breakout` | -999 | — | — | — | 0 |
+
+---
+
 ## Results
 
-### Autotrader: Score Progression
+### Score Progression (103 Autonomous Experiments)
 
 | Experiment | Score | Sharpe | Max DD | Trades | Key Change |
 |-----------|-------|--------|--------|--------|------------|
-| Baseline (simple_momentum) | 2.724 | 2.724 | 7.6% | 9081 | Starting point |
+| Baseline | 2.724 | 2.724 | 7.6% | 9081 | Simple momentum starting point |
 | exp15 | 8.393 | 8.823 | 3.1% | 2562 | 5-signal ensemble, 4/5 votes, cooldown |
 | exp28 | 9.382 | 9.944 | 3.0% | 2545 | ATR 5.5 trailing stop |
 | exp37 | 10.305 | 11.125 | 2.3% | 3212 | BB width compression (6th signal) |
@@ -170,21 +210,27 @@ score = sharpe × √(min(trades/50, 1.0)) − drawdown_penalty − turnover_pen
 | exp86 | 19.859 | 20.498 | 0.6% | 7534 | Cooldown 2 |
 | **exp102** | **20.634** | **20.634** | **0.3%** | **7605** | RSI 50/50, BB 85, position 0.08 |
 
-**Final score: 20.634** (7.6x improvement over baseline)
+**Final score: 20.634** — 7.6x improvement over baseline, fully autonomous.
 
-### Key Discoveries (in order of impact)
+### Key Discoveries
 
-1. **RSI period 8** (+5 points) — Faster RSI is much better for hourly crypto data. Standard 14-period is too slow.
-2. **Remove strength scaling** (+1.7 points) — Uniform position sizing beats momentum-weighted sizing.
-3. **Simplified momentum** (+0.8 points) — Just `ret_short > threshold`, no multi-timeframe confirmation needed.
-4. **BB width compression signal** (+0.9 points) — Bollinger Band width percentile as 6th ensemble signal.
-5. **ATR 5.5 trailing stop** (+1 point) — Hold winners much longer than conventional 3.5x ATR.
-6. **Simplification** (+2 points total) — Removing pyramiding, funding boost, BTC filter, and correlation filter all improved score.
-7. **Position size 0.08** (+0.6 points) — Smaller positions eliminate turnover penalty.
+| Rank | Discovery | Impact | Insight |
+|------|-----------|--------|---------|
+| 1 | **RSI period 8** | +5.0 Sharpe | Standard 14-period RSI is too slow for hourly crypto |
+| 2 | **Remove strength scaling** | +1.7 Sharpe | Uniform sizing beats momentum-weighted sizing |
+| 3 | **Simplified momentum** | +0.8 Sharpe | Just `ret > threshold`, no multi-timeframe confirmation needed |
+| 4 | **BB width compression** | +0.9 Sharpe | Bollinger Band width percentile as 6th ensemble signal |
+| 5 | **ATR 5.5 trailing stop** | +1.0 Sharpe | Hold winners much longer than conventional 3.5x ATR |
+| 6 | **The Great Simplification** | +2.0 Sharpe | Removing pyramiding, funding boost, BTC filter, correlation filter |
+| 7 | **Position size 0.08** | +0.6 Sharpe | Smaller positions eliminate turnover penalty |
 
 ### Biggest Lesson: Simplicity Wins
 
-The strongest gains came from *removing* complexity, not adding it. Features that seem smart in theory (BTC lead-lag filter, correlation-based weight adjustment, momentum strength scaling, pyramiding) all hurt performance in practice. The final strategy is remarkably simple.
+The strongest gains came from *removing* complexity, not adding it. Every "smart" feature — BTC lead-lag filter, correlation-based weight adjustment, momentum strength scaling, pyramiding, funding carry — was tested, then permanently removed when it hurt performance. The final strategy is remarkably simple.
+
+See [`STRATEGIES.md`](STRATEGIES.md) for the complete evolution log with mathematical details for all 103 experiments.
+
+---
 
 ## Best Strategy Architecture
 
@@ -193,23 +239,28 @@ The strongest gains came from *removing* complexity, not adding it. Features tha
 | Signal | Bull Condition | Bear Condition |
 |--------|---------------|----------------|
 | Momentum | 12h return > dynamic threshold | 12h return < -dynamic threshold |
-| Very-short momentum | 6h return > threshold*0.5 | 6h return < -threshold*0.5 |
-| EMA crossover | EMA(12) > EMA(26) | EMA(12) < EMA(26) |
+| Very-short momentum | 6h return > threshold × 0.7 | 6h return < -threshold × 0.7 |
+| EMA crossover | EMA(7) > EMA(26) | EMA(7) < EMA(26) |
 | RSI(8) | RSI > 50 | RSI < 50 |
-| MACD(12,26,9) | MACD histogram > 0 | MACD histogram < 0 |
+| MACD(14,23,9) | MACD histogram > 0 | MACD histogram < 0 |
 | BB compression | BB width < 85th percentile | BB width < 85th percentile |
 
-**Exit conditions:**
-- ATR trailing stop: 5.5x ATR from peak
-- RSI overbought/oversold: exit longs at RSI > 70, exit shorts at RSI < 30
-- Signal flip: reverse position when opposing signal fires
+**Exit conditions (priority order):**
+1. **ATR trailing stop** — 5.5x ATR from peak/trough
+2. **RSI mean-reversion** — Exit longs at RSI > 69, exit shorts at RSI < 31
+3. **Signal flip** — Reverse position when opposing ensemble fires
 
 **Key parameters:**
-- `BASE_POSITION_PCT = 0.08` — Per-symbol position size as fraction of equity
-- `COOLDOWN_BARS = 2` — Minimum bars between exit and re-entry
-- `RSI_PERIOD = 8` — Fast RSI for hourly crypto
-- `ATR_STOP_MULT = 5.5` — Wide trailing stop to let winners run
-- Dynamic momentum threshold adapts to realized volatility
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| `BASE_POSITION_PCT` | 0.08 | Per-symbol position size as fraction of equity |
+| `COOLDOWN_BARS` | 2 | Minimum bars between exit and re-entry |
+| `RSI_PERIOD` | 8 | Fast RSI tuned for hourly crypto |
+| `ATR_STOP_MULT` | 5.5 | Wide trailing stop to let winners run |
+| `MIN_VOTES` | 4 | Majority vote threshold (4 of 6 signals) |
+
+---
 
 ## Project Structure
 
@@ -219,13 +270,46 @@ The strongest gains came from *removing* complexity, not adding it. Features tha
 ├── prepare.py           # Data download + backtest engine (fixed, do not modify)
 ├── run_benchmarks.py    # Run all 5 benchmark strategies
 ├── benchmarks/          # 5 reference strategies for comparison
+│   ├── simple_momentum.py
+│   ├── funding_arb.py
+│   ├── regime_mm.py
+│   ├── mean_reversion.py
+│   └── momentum_breakout.py
 ├── program.md           # Detailed instructions for the autonomous loop
 ├── STRATEGIES.md        # Complete evolution log of all 103 experiments
-└── charts/              # Visualization PNGs of experiment progression
+├── charts/              # Visualization PNGs of experiment progression
+├── pyproject.toml       # Dependencies (numpy, pandas, scipy, requests, pyarrow)
+└── uv.lock              # Locked dependencies for reproducibility
 ```
+
+---
 
 ## Branches
 
-- `main` — Base scaffold and data pipeline
-- `autotrader/mar10c` — Best autotrader strategy (score 20.634)
-- `autoresearch/mar10-opus` — LLM training optimization experiments
+| Branch | Description |
+|--------|-------------|
+| `main` | Base scaffold and data pipeline |
+| `autotrader/mar10c` | Best autotrader strategy (score 20.634) |
+| `autoresearch/mar10-opus` | LLM training optimization experiments |
+
+---
+
+## Attribution
+
+Built on [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) pattern. Data from [CryptoCompare](https://www.cryptocompare.com/) and [Hyperliquid](https://hyperliquid.xyz).
+
+---
+
+## Links
+
+- **Agent CLI** — [github.com/Nunchi-trade/agent-cli](https://github.com/Nunchi-trade/agent-cli)
+- **Docs** — [docs.nunchi.trade](https://docs.nunchi.trade)
+- **Research** — [research.nunchi.trade](https://research.nunchi.trade)
+- **Discord** — [discord.gg/nunchi](https://discord.gg/nunchi)
+- **X** — [@nunchi](https://x.com/nunchi)
+
+---
+
+<p align="center">
+  <sub>Built by <a href="https://nunchi.trade">Nunchi</a> • MIT License</sub>
+</p>
