@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="charts/1_score_evolution.png" alt="Score Evolution" width="600" />
+  <img src="assets/logo.png" alt="Nunchi" width="480" />
 </p>
 
 <h3 align="center">Autonomous Trading Strategy Research</h3>
