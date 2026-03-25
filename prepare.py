@@ -24,13 +24,13 @@ import pyarrow.parquet as pq
 # Constants (fixed, do not modify)
 # ---------------------------------------------------------------------------
 
-TIME_BUDGET = 120              # backtest time budget in seconds (2 minutes)
-INITIAL_CAPITAL = 100_000.0    # $100K starting capital
-MAKER_FEE = 0.0002             # 2 bps
-TAKER_FEE = 0.0005             # 5 bps
-SLIPPAGE_BPS = 1.0             # 1 bps simulated slippage
-MAX_LEVERAGE = 20              # max leverage allowed
-LOOKBACK_BARS = 500            # history buffer provided to strategy
+TIME_BUDGET = 300  # backtest time budget in seconds (5 minutes)
+INITIAL_CAPITAL = 100_000.0  # $100K starting capital
+MAKER_FEE = 0.0002  # 2 bps
+TAKER_FEE = 0.0005  # 5 bps
+SLIPPAGE_BPS = 1.0  # 1 bps simulated slippage
+MAX_LEVERAGE = 1  # max leverage allowed
+LOOKBACK_BARS = 500  # history buffer provided to strategy
 BAR_INTERVAL = "1h"
 
 SYMBOLS = ["BTC", "ETH", "SOL"]
@@ -56,6 +56,7 @@ DATA_DIR = os.path.join(CACHE_DIR, "data")
 # Data types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BarData:
     symbol: str
@@ -68,19 +69,22 @@ class BarData:
     funding_rate: float
     history: pd.DataFrame  # last LOOKBACK_BARS bars
 
+
 @dataclass
 class Signal:
     symbol: str
-    target_position: float   # target USD notional (signed: +long, -short)
+    target_position: float  # target USD notional (signed: +long, -short)
     order_type: str = "market"
+
 
 @dataclass
 class PortfolioState:
     cash: float
-    positions: dict          # symbol -> signed USD notional
-    entry_prices: dict       # symbol -> avg entry price
+    positions: dict  # symbol -> signed USD notional
+    entry_prices: dict  # symbol -> avg entry price
     equity: float = 0.0
     timestamp: int = 0
+
 
 @dataclass
 class BacktestResult:
@@ -95,6 +99,7 @@ class BacktestResult:
     equity_curve: list = field(default_factory=list)
     trade_log: list = field(default_factory=list)
 
+
 # ---------------------------------------------------------------------------
 # Data download
 # ---------------------------------------------------------------------------
@@ -102,7 +107,10 @@ class BacktestResult:
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 CRYPTOCOMPARE_URL = "https://min-api.cryptocompare.com/data/v2/histohour"
 
-def _download_cryptocompare_candles(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+
+def _download_cryptocompare_candles(
+    symbol: str, start_ms: int, end_ms: int
+) -> pd.DataFrame:
     """Download hourly OHLCV from CryptoCompare (no geo-restrictions)."""
     all_rows = []
     # CryptoCompare uses 'toTs' (end timestamp in seconds) and returns up to 2000 bars
@@ -126,14 +134,16 @@ def _download_cryptocompare_candles(symbol: str, start_ms: int, end_ms: int) -> 
             ts_s = bar["time"]
             if ts_s < start_s:
                 continue
-            all_rows.append({
-                "timestamp": ts_s * 1000,
-                "open": float(bar["open"]),
-                "high": float(bar["high"]),
-                "low": float(bar["low"]),
-                "close": float(bar["close"]),
-                "volume": float(bar.get("volumefrom", 0)),
-            })
+            all_rows.append(
+                {
+                    "timestamp": ts_s * 1000,
+                    "open": float(bar["open"]),
+                    "high": float(bar["high"]),
+                    "low": float(bar["low"]),
+                    "close": float(bar["close"]),
+                    "volume": float(bar.get("volumefrom", 0)),
+                }
+            )
         # Move window back
         earliest = bars[0]["time"]
         if earliest >= current_end:
@@ -143,7 +153,12 @@ def _download_cryptocompare_candles(symbol: str, start_ms: int, end_ms: int) -> 
 
     if not all_rows:
         return pd.DataFrame()
-    df = pd.DataFrame(all_rows).sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
+    df = (
+        pd.DataFrame(all_rows)
+        .sort_values("timestamp")
+        .drop_duplicates("timestamp")
+        .reset_index(drop=True)
+    )
     return df
 
 
@@ -165,10 +180,12 @@ def _download_hl_funding(symbol: str, start_ms: int, end_ms: int) -> pd.DataFram
             if not data:
                 break
             for row in data:
-                all_rows.append({
-                    "timestamp": int(row["time"]),
-                    "funding_rate": float(row["fundingRate"]),
-                })
+                all_rows.append(
+                    {
+                        "timestamp": int(row["time"]),
+                        "funding_rate": float(row["fundingRate"]),
+                    }
+                )
             current = int(data[-1]["time"]) + 1
         except Exception:
             break
@@ -179,7 +196,9 @@ def _download_hl_funding(symbol: str, start_ms: int, end_ms: int) -> pd.DataFram
     return pd.DataFrame(all_rows)
 
 
-def _download_hl_candles(symbol: str, interval: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _download_hl_candles(
+    symbol: str, interval: str, start_ms: int, end_ms: int
+) -> pd.DataFrame:
     """Download OHLCV candles from Hyperliquid."""
     all_rows = []
     current = start_ms
@@ -192,7 +211,7 @@ def _download_hl_candles(symbol: str, interval: str, start_ms: int, end_ms: int)
                 "interval": interval,
                 "startTime": current,
                 "endTime": min(current + chunk_ms, end_ms),
-            }
+            },
         }
         try:
             resp = requests.post(HL_INFO_URL, json=body, timeout=30)
@@ -202,14 +221,16 @@ def _download_hl_candles(symbol: str, interval: str, start_ms: int, end_ms: int)
                 current += chunk_ms
                 continue
             for row in data:
-                all_rows.append({
-                    "timestamp": int(row["t"]),
-                    "open": float(row["o"]),
-                    "high": float(row["h"]),
-                    "low": float(row["l"]),
-                    "close": float(row["c"]),
-                    "volume": float(row["v"]),
-                })
+                all_rows.append(
+                    {
+                        "timestamp": int(row["t"]),
+                        "open": float(row["o"]),
+                        "high": float(row["h"]),
+                        "low": float(row["l"]),
+                        "close": float(row["c"]),
+                        "volume": float(row["v"]),
+                    }
+                )
             current = int(data[-1]["t"]) + 3600 * 1000
         except Exception:
             current += chunk_ms
@@ -238,7 +259,9 @@ def download_data(symbols=None):
         # Use CryptoCompare for reliable historical OHLCV (no geo-restrictions)
         df = _download_cryptocompare_candles(symbol, start_ms, end_ms)
         if len(df) < 100:
-            print(f"  {symbol}: CryptoCompare insufficient ({len(df)} bars), trying HL...")
+            print(
+                f"  {symbol}: CryptoCompare insufficient ({len(df)} bars), trying HL..."
+            )
             df = _download_hl_candles(symbol, "1h", start_ms, end_ms)
 
         if df.empty:
@@ -250,9 +273,15 @@ def download_data(symbols=None):
         funding = _download_hl_funding(symbol, start_ms, end_ms)
 
         # Merge
-        df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        df = (
+            df.drop_duplicates(subset=["timestamp"])
+            .sort_values("timestamp")
+            .reset_index(drop=True)
+        )
         if not funding.empty:
-            funding = funding.drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
+            funding = funding.drop_duplicates(subset=["timestamp"]).sort_values(
+                "timestamp"
+            )
             # Merge nearest — funding is every 8h, candles every 1h
             df = pd.merge_asof(df, funding, on="timestamp", direction="backward")
         if "funding_rate" not in df.columns:
@@ -287,9 +316,11 @@ def load_data(split: str = "val") -> dict:
             result[symbol] = split_df
     return result
 
+
 # ---------------------------------------------------------------------------
 # Backtesting engine (DO NOT CHANGE)
 # ---------------------------------------------------------------------------
+
 
 def run_backtest(strategy, data: dict) -> BacktestResult:
     """
@@ -387,7 +418,11 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
                     price_change = (current_price - entry_price) / entry_price
                     unrealized_pnl += pos_notional * price_change
 
-        portfolio.equity = portfolio.cash + sum(abs(v) for v in portfolio.positions.values()) + unrealized_pnl
+        portfolio.equity = (
+            portfolio.cash
+            + sum(abs(v) for v in portfolio.positions.values())
+            + unrealized_pnl
+        )
 
         # Apply funding rates (on open positions)
         for sym, pos_notional in list(portfolio.positions.items()):
@@ -405,7 +440,7 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
             signals = []
 
         # Execute signals
-        for sig in (signals or []):
+        for sig in signals or []:
             if sig.symbol not in bar_data:
                 continue
 
@@ -446,7 +481,15 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
                     del portfolio.entry_prices[sig.symbol]
                 if sig.symbol in portfolio.positions:
                     del portfolio.positions[sig.symbol]
-                trade_log.append(("close", sig.symbol, delta, exec_price, pnl if 'pnl' in dir() else 0))
+                trade_log.append(
+                    (
+                        "close",
+                        sig.symbol,
+                        delta,
+                        exec_price,
+                        pnl if "pnl" in dir() else 0,
+                    )
+                )
             else:
                 if current_pos == 0:
                     # Opening new position
@@ -462,7 +505,12 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
                     if abs(sig.target_position) < abs(current_pos):
                         reduced = abs(current_pos) - abs(sig.target_position)
                         if old_entry > 0:
-                            pnl = (current_pos / abs(current_pos)) * reduced * (exec_price - old_entry) / old_entry
+                            pnl = (
+                                (current_pos / abs(current_pos))
+                                * reduced
+                                * (exec_price - old_entry)
+                                / old_entry
+                            )
                         else:
                             pnl = 0
                         portfolio.cash += reduced + pnl
@@ -471,7 +519,9 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
                         portfolio.cash -= added
                         # Weighted average entry
                         if old_notional + added > 0:
-                            new_entry = (old_entry * old_notional + exec_price * added) / (old_notional + added)
+                            new_entry = (
+                                old_entry * old_notional + exec_price * added
+                            ) / (old_notional + added)
                             portfolio.entry_prices[sig.symbol] = new_entry
                     portfolio.positions[sig.symbol] = sig.target_position
                     trade_log.append(("modify", sig.symbol, delta, exec_price, 0))
@@ -486,7 +536,11 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
                     price_change = (current_price - entry_price) / entry_price
                     unrealized_pnl += pos_notional * price_change
 
-        current_equity = portfolio.cash + sum(abs(v) for v in portfolio.positions.values()) + unrealized_pnl
+        current_equity = (
+            portfolio.cash
+            + sum(abs(v) for v in portfolio.positions.values())
+            + unrealized_pnl
+        )
         equity_curve.append(current_equity)
 
         # Hourly return
@@ -553,9 +607,11 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
         trade_log=trade_log,
     )
 
+
 # ---------------------------------------------------------------------------
 # Evaluation metric (DO NOT CHANGE — this is the fixed metric)
 # ---------------------------------------------------------------------------
+
 
 def compute_score(result: BacktestResult) -> float:
     """
@@ -581,11 +637,18 @@ def compute_score(result: BacktestResult) -> float:
     drawdown_penalty = max(0, result.max_drawdown_pct - 15.0) * 0.05
 
     # Turnover penalty: penalize excessive churning (>500x annual)
-    turnover_ratio = result.annual_turnover / INITIAL_CAPITAL if INITIAL_CAPITAL > 0 else 0
+    turnover_ratio = (
+        result.annual_turnover / INITIAL_CAPITAL if INITIAL_CAPITAL > 0 else 0
+    )
     turnover_penalty = max(0, turnover_ratio - 500) * 0.001
 
-    score = result.sharpe * math.sqrt(trade_count_factor) - drawdown_penalty - turnover_penalty
+    score = (
+        result.sharpe * math.sqrt(trade_count_factor)
+        - drawdown_penalty
+        - turnover_penalty
+    )
     return score
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -593,7 +656,9 @@ def compute_score(result: BacktestResult) -> float:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare data for autotrader")
-    parser.add_argument("--symbols", nargs="+", default=None, help="Symbols to download (default: all)")
+    parser.add_argument(
+        "--symbols", nargs="+", default=None, help="Symbols to download (default: all)"
+    )
     args = parser.parse_args()
 
     print(f"Cache directory: {CACHE_DIR}")
