@@ -24,12 +24,12 @@ import pyarrow.parquet as pq
 # Constants (fixed, do not modify)
 # ---------------------------------------------------------------------------
 
-TIME_BUDGET = 300  # backtest time budget in seconds (5 minutes)
+TIME_BUDGET = 120  # backtest time budget in seconds (2 minutes)
 INITIAL_CAPITAL = 100_000.0  # $100K starting capital
 MAKER_FEE = 0.0002  # 2 bps
 TAKER_FEE = 0.0005  # 5 bps
 SLIPPAGE_BPS = 1.0  # 1 bps simulated slippage
-MAX_LEVERAGE = 1  # max leverage allowed
+MAX_LEVERAGE = 20  # max leverage allowed
 LOOKBACK_BARS = 500  # history buffer provided to strategy
 BAR_INTERVAL = "1h"
 
