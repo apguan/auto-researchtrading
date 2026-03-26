@@ -2,7 +2,10 @@
 1-minute backtest: downloads last 24h of 1m candles from Hyperliquid,
 runs the current strategy through a minute-resolution backtest engine.
 
-Usage: uv run backtest_1m.py
+Usage: uv run backtest_1m.py [--data-dir DIR] [--download]
+
+Defaults to loading from backtest_data/1m_candles/ (committed data).
+Use --download to fetch fresh data from Hyperliquid instead.
 """
 
 import os
@@ -24,9 +27,14 @@ LOOKBACK_BARS = 500
 MINUTES_PER_YEAR = 525_600
 FUNDING_BARS = 480  # 8h in minutes — funding is applied every 8h on Hyperliquid
 
-SYMBOLS = ["BTC", "ETH", "SOL"]
+SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
-DATA_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autotrader", "data_1m")
+DEFAULT_DATA_DIR = os.path.join(
+    os.path.dirname(__file__), "backtest_data", "1m_candles"
+)
+CACHE_DATA_DIR = os.path.join(
+    os.path.expanduser("~"), ".cache", "autotrader", "data_1m"
+)
 
 
 def download_1m_candles(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
@@ -105,14 +113,14 @@ def download_funding_rates(symbol: str, start_ms: int, end_ms: int) -> pd.DataFr
 
 
 def download_all_data(hours_back: int = 24):
-    """Download 1m candles + funding for all symbols, save to parquet, return loaded data."""
-    os.makedirs(DATA_DIR, exist_ok=True)
+    """Download 1m candles + funding for all symbols, save to cache, return loaded data."""
+    os.makedirs(CACHE_DATA_DIR, exist_ok=True)
 
     end_ms = int(time.time() * 1000)
     start_ms = end_ms - (hours_back * 3600 * 1000)
 
     for symbol in SYMBOLS:
-        filepath = os.path.join(DATA_DIR, f"{symbol}_1m.parquet")
+        filepath = os.path.join(CACHE_DATA_DIR, f"{symbol}_1m.parquet")
         if os.path.exists(filepath):
             existing = pd.read_parquet(filepath)
             newest = existing["timestamp"].max()
@@ -145,12 +153,13 @@ def download_all_data(hours_back: int = 24):
     return load_data()
 
 
-def load_data() -> dict:
-    """Load 1m parquet data. Returns {symbol: DataFrame}."""
+def load_data(data_dir: str = DEFAULT_DATA_DIR) -> dict:
+    """Load 1m parquet data from data_dir. Returns {symbol: DataFrame}."""
     result = {}
     for symbol in SYMBOLS:
-        filepath = os.path.join(DATA_DIR, f"{symbol}_1m.parquet")
+        filepath = os.path.join(data_dir, f"{symbol}_1m.parquet")
         if not os.path.exists(filepath):
+            print(f"  Warning: no data for {symbol} at {filepath}")
             continue
         df = pd.read_parquet(filepath)
         if len(df) > 0:
@@ -404,14 +413,38 @@ def run_backtest_1m(strategy, data: dict) -> dict:
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="1-minute backtest")
+    parser.add_argument(
+        "--data-dir", default=DEFAULT_DATA_DIR, help="Directory with *_1m.parquet files"
+    )
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download fresh data from Hyperliquid instead of loading files",
+    )
+    parser.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="Hours of data to download (only with --download)",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
-    print("1-Minute Backtest (last 24h)")
+    print("1-Minute Backtest")
     print("=" * 60)
 
-    print("\nDownloading data...")
-    data = download_all_data(hours_back=24)
+    if args.download:
+        print(f"\nDownloading {args.hours}h of 1m data...")
+        data = download_all_data(hours_back=args.hours)
+    else:
+        print(f"\nLoading data from {args.data_dir} ...")
+        data = load_data(args.data_dir)
+
     if not data:
-        print("ERROR: No data downloaded")
+        print("ERROR: No data available")
         sys.exit(1)
 
     total_bars = sum(len(df) for df in data.values())

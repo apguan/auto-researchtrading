@@ -10,8 +10,8 @@ Changes from exp28 (ATR 5.5, score 9.382):
 import numpy as np
 from prepare import Signal, PortfolioState, BarData
 
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL"]
-SYMBOL_WEIGHTS = {"BTC": 0.33, "ETH": 0.33, "SOL": 0.33}
+ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
+SYMBOL_WEIGHTS = {"BTC": 0.25, "ETH": 0.25, "SOL": 0.25, "XRP": 0.25}
 
 SHORT_WINDOW = 6
 MED_WINDOW = 12
@@ -53,6 +53,7 @@ DD_REDUCE_SCALE = 0.5
 COOLDOWN_BARS = 2
 MIN_VOTES = 4  # out of 6 now
 
+
 def ema(values, span):
     alpha = 2.0 / (span + 1)
     result = np.empty_like(values, dtype=float)
@@ -61,10 +62,11 @@ def ema(values, span):
         result[i] = alpha * values[i] + (1 - alpha) * result[i - 1]
     return result
 
+
 def calc_rsi(closes, period):
     if len(closes) < period + 1:
         return 50.0
-    deltas = np.diff(closes[-(period+1):])
+    deltas = np.diff(closes[-(period + 1) :])
     gains = np.where(deltas > 0, deltas, 0)
     losses = np.where(deltas < 0, -deltas, 0)
     avg_gain = np.mean(gains)
@@ -89,9 +91,10 @@ class Strategy:
             return None
         highs = history["high"].values[-lookback:]
         lows = history["low"].values[-lookback:]
-        closes = history["close"].values[-(lookback+1):-1]
-        tr = np.maximum(highs - lows,
-                        np.maximum(np.abs(highs - closes), np.abs(lows - closes)))
+        closes = history["close"].values[-(lookback + 1) : -1]
+        tr = np.maximum(
+            highs - lows, np.maximum(np.abs(highs - closes), np.abs(lows - closes))
+        )
         return np.mean(tr)
 
     def _calc_vol(self, closes, lookback):
@@ -117,8 +120,8 @@ class Strategy:
     def _calc_macd(self, closes):
         if len(closes) < MACD_SLOW + MACD_SIGNAL + 5:
             return 0.0
-        fast_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5):], MACD_FAST)
-        slow_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5):], MACD_SLOW)
+        fast_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5) :], MACD_FAST)
+        slow_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5) :], MACD_SLOW)
         macd_line = fast_ema - slow_ema
         signal_line = ema(macd_line, MACD_SIGNAL)
         return macd_line[-1] - signal_line[-1]
@@ -130,7 +133,7 @@ class Strategy:
         # Calculate rolling BB width
         widths = []
         for i in range(period * 2, len(closes)):
-            window = closes[i-period:i]
+            window = closes[i - period : i]
             sma = np.mean(window)
             std = np.std(window)
             width = (2 * std) / sma if sma > 0 else 0
@@ -151,11 +154,15 @@ class Strategy:
         current_dd = (self.peak_equity - equity) / self.peak_equity
         dd_scale = 1.0
         if current_dd > DD_REDUCE_THRESHOLD:
-            dd_scale = max(DD_REDUCE_SCALE, 1.0 - (current_dd - DD_REDUCE_THRESHOLD) * 5)
+            dd_scale = max(
+                DD_REDUCE_SCALE, 1.0 - (current_dd - DD_REDUCE_THRESHOLD) * 5
+            )
 
         if "BTC" in bar_data and len(bar_data["BTC"].history) >= LONG_WINDOW + 1:
             btc_closes = bar_data["BTC"].history["close"].values
-            self.btc_momentum = (btc_closes[-1] - btc_closes[-MED2_WINDOW]) / btc_closes[-MED2_WINDOW]
+            self.btc_momentum = (
+                btc_closes[-1] - btc_closes[-MED2_WINDOW]
+            ) / btc_closes[-MED2_WINDOW]
 
         btc_eth_corr = self._calc_correlation(bar_data)
         high_corr = btc_eth_corr > HIGH_CORR_THRESHOLD
@@ -164,7 +171,11 @@ class Strategy:
             if symbol not in bar_data:
                 continue
             bd = bar_data[symbol]
-            if len(bd.history) < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5, BB_PERIOD * 3) + 1:
+            if (
+                len(bd.history)
+                < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5, BB_PERIOD * 3)
+                + 1
+            ):
                 continue
 
             closes = bd.history["close"].values
@@ -185,8 +196,8 @@ class Strategy:
             vshort_bull = ret_vshort > dyn_threshold * 0.7
             vshort_bear = ret_vshort < -dyn_threshold * 0.7
 
-            ema_fast_arr = ema(closes[-(EMA_SLOW+10):], EMA_FAST)
-            ema_slow_arr = ema(closes[-(EMA_SLOW+10):], EMA_SLOW)
+            ema_fast_arr = ema(closes[-(EMA_SLOW + 10) :], EMA_FAST)
+            ema_slow_arr = ema(closes[-(EMA_SLOW + 10) :], EMA_SLOW)
             ema_bull = ema_fast_arr[-1] > ema_slow_arr[-1]
             ema_bear = ema_fast_arr[-1] < ema_slow_arr[-1]
 
@@ -202,20 +213,29 @@ class Strategy:
             bb_pctile = self._calc_bb_width_pctile(closes, BB_PERIOD)
             bb_compressed = bb_pctile < 90  # Below 40th percentile = compressed
 
-            bull_votes = sum([mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed])
-            bear_votes = sum([mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed])
+            bull_votes = sum(
+                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed]
+            )
+            bear_votes = sum(
+                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed]
+            )
 
             btc_confirm = True
             if symbol != "BTC":
                 if bull_votes >= MIN_VOTES and self.btc_momentum < BTC_OPPOSE_THRESHOLD:
                     btc_confirm = False
-                if bear_votes >= MIN_VOTES and self.btc_momentum > -BTC_OPPOSE_THRESHOLD:
+                if (
+                    bear_votes >= MIN_VOTES
+                    and self.btc_momentum > -BTC_OPPOSE_THRESHOLD
+                ):
                     btc_confirm = False
 
             bullish = bull_votes >= MIN_VOTES and btc_confirm
             bearish = bear_votes >= MIN_VOTES and btc_confirm
 
-            in_cooldown = (self.bar_count - self.exit_bar.get(symbol, -999)) < COOLDOWN_BARS
+            in_cooldown = (
+                self.bar_count - self.exit_bar.get(symbol, -999)
+            ) < COOLDOWN_BARS
 
             vol_scale = 1.0
             weight = SYMBOL_WEIGHTS.get(symbol, 0.33)
@@ -223,10 +243,21 @@ class Strategy:
                 weight *= 0.5
             mom_strength = abs(ret_short) / dyn_threshold
             strength_scale = 1.0
-            size = equity * BASE_POSITION_PCT * weight * vol_scale * strength_scale * dd_scale
+            size = (
+                equity
+                * BASE_POSITION_PCT
+                * weight
+                * vol_scale
+                * strength_scale
+                * dd_scale
+            )
 
             funding_rates = bd.history["funding_rate"].values[-FUNDING_LOOKBACK:]
-            avg_funding = np.mean(funding_rates) if len(funding_rates) >= FUNDING_LOOKBACK else 0.0
+            avg_funding = (
+                np.mean(funding_rates)
+                if len(funding_rates) >= FUNDING_LOOKBACK
+                else 0.0
+            )
 
             current_pos = portfolio.positions.get(symbol, 0.0)
             target = current_pos
@@ -299,17 +330,23 @@ class Strategy:
                 if target != 0 and current_pos == 0:
                     self.entry_prices[symbol] = mid
                     self.peak_prices[symbol] = mid
-                    self.atr_at_entry[symbol] = self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
+                    self.atr_at_entry[symbol] = (
+                        self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
+                    )
                 elif target == 0:
                     self.entry_prices.pop(symbol, None)
                     self.peak_prices.pop(symbol, None)
                     self.atr_at_entry.pop(symbol, None)
                     self.pyramided.pop(symbol, None)
                     self.exit_bar[symbol] = self.bar_count
-                elif (target > 0 and current_pos < 0) or (target < 0 and current_pos > 0):
+                elif (target > 0 and current_pos < 0) or (
+                    target < 0 and current_pos > 0
+                ):
                     self.entry_prices[symbol] = mid
                     self.peak_prices[symbol] = mid
-                    self.atr_at_entry[symbol] = self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
+                    self.atr_at_entry[symbol] = (
+                        self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
+                    )
                     self.pyramided[symbol] = False
 
         return signals
