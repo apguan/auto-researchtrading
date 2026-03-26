@@ -13,6 +13,19 @@ from monitoring.logger import get_logger
 logger = get_logger(__name__)
 
 
+def parse_interval_minutes(interval: str) -> int:
+    raw = interval.rstrip("mhs")
+    value = int(raw)
+    unit = interval[-1]
+    if unit == "h":
+        return value * 60
+    if unit == "m":
+        return value
+    if unit == "s":
+        return max(1, value // 60)
+    return value
+
+
 class DataStreamer:
     def __init__(
         self,
@@ -26,7 +39,8 @@ class DataStreamer:
         self.on_tick_callback = on_tick_callback
 
         self.ws_url = self.settings.HYPERLIQUID_WS_URL
-        self.bar_builder = BarBuilder(symbols, interval_minutes=60)
+        interval_minutes = parse_interval_minutes(self.settings.BAR_INTERVAL)
+        self.bar_builder = BarBuilder(symbols, interval_minutes=interval_minutes)
 
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._running = False
@@ -35,15 +49,22 @@ class DataStreamer:
 
         self.latest_prices: Dict[str, float] = {}
         self.latest_volumes: Dict[str, float] = {}
+        self._last_candle_ts: Dict[str, int] = {}
+        self._client: Optional[HyperliquidClient] = None
+        self._bar_count_since_funding_fetch: int = 0
+        self._FUNDING_FETCH_INTERVAL: int = 8
 
     async def start(self, client: Optional[HyperliquidClient] = None):
         self._running = True
+        self._client = client
 
         if client:
             await self._load_historical_data(client)
 
         if self.on_bar_callback:
             self.bar_builder.add_bar_callback(self.on_bar_callback)
+
+        self.bar_builder.add_bar_callback(self._on_bar_for_funding)
 
         while self._running:
             try:
@@ -64,7 +85,9 @@ class DataStreamer:
         for symbol in self.symbols:
             try:
                 candles = await client.get_recent_candles(
-                    symbol=symbol, interval="1h", limit=self.settings.LOOKBACK_BARS
+                    symbol=symbol,
+                    interval=self.settings.BAR_INTERVAL,
+                    limit=self.settings.LOOKBACK_BARS,
                 )
                 self.bar_builder.add_historical_candles(symbol, candles)
 
@@ -114,6 +137,16 @@ class DataStreamer:
             }
             await self._ws.send(json.dumps(subscription))
 
+            subscription = {
+                "method": "subscribe",
+                "subscription": {
+                    "type": "candle",
+                    "coin": symbol,
+                    "interval": self.settings.BAR_INTERVAL,
+                },
+            }
+            await self._ws.send(json.dumps(subscription))
+
             logger.debug(f"Subscribed to {symbol}")
 
     async def _handle_message(self, data: dict):
@@ -149,6 +182,55 @@ class DataStreamer:
 
         elif channel == "subscriptionResponse":
             logger.debug(f"Subscription response: {data}")
+
+        elif channel == "candle":
+            candle_data = data.get("data", {})
+            coin = candle_data.get("coin") or candle_data.get("s")
+            if coin in self.symbols:
+                candle_ts = int(candle_data.get("t", 0))
+
+                last_ts = self._last_candle_ts.get(coin, 0)
+                if candle_ts <= last_ts:
+                    return
+                self._last_candle_ts[coin] = candle_ts
+
+                candle = Candle(
+                    symbol=coin,
+                    timestamp=candle_ts,
+                    open=float(candle_data.get("o", 0)),
+                    high=float(candle_data.get("h", 0)),
+                    low=float(candle_data.get("l", 0)),
+                    close=float(candle_data.get("c", 0)),
+                    volume=float(candle_data.get("v", 0)),
+                    funding_rate=self.bar_builder._latest_funding_rates.get(coin, 0.0),
+                )
+
+                self.bar_builder.add_historical_candles(coin, [candle])
+                self.latest_volumes[coin] = candle.volume
+
+                if self.on_bar_callback:
+                    await self._safe_callback(self.on_bar_callback, coin, candle)
+
+    async def _fetch_funding_rates(self):
+        if not self._client:
+            return
+        for symbol in self.symbols:
+            try:
+                rate = await self._client.get_funding_rate(symbol)
+                self.bar_builder.on_tick(
+                    symbol, self.latest_prices.get(symbol, 0.0), funding_rate=rate
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to fetch funding rate",
+                    extra={"symbol": symbol, "error": str(e)},
+                )
+
+    async def _on_bar_for_funding(self, symbol: str, candle: Candle):
+        self._bar_count_since_funding_fetch += 1
+        if self._bar_count_since_funding_fetch >= self._FUNDING_FETCH_INTERVAL:
+            self._bar_count_since_funding_fetch = 0
+            await self._fetch_funding_rates()
 
     async def _safe_callback(self, callback: Callable, *args):
         try:
