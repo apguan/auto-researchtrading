@@ -22,6 +22,7 @@ class BarBuilder:
         self.history_buffers: Dict[str, deque] = {
             s: deque(maxlen=self.settings.LOOKBACK_BARS) for s in symbols
         }
+        self._latest_funding_rates: Dict[str, float] = {s: 0.0 for s in symbols}
 
         self._bar_callbacks: List[Callable] = []
         self._current_interval_start: Optional[int] = None
@@ -35,9 +36,13 @@ class BarBuilder:
         price: float,
         volume: float = 0,
         timestamp: Optional[int] = None,
+        funding_rate: Optional[float] = None,
     ):
         if symbol not in self.symbols:
             return
+
+        if funding_rate is not None:
+            self._latest_funding_rates[symbol] = funding_rate
 
         if timestamp is None:
             timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -90,12 +95,13 @@ class BarBuilder:
             low=bar["low"],
             close=bar["close"],
             volume=bar["volume"],
+            funding_rate=self._latest_funding_rates.get(symbol, 0.0),
         )
 
         self.completed_bars[symbol].append(candle)
         self.history_buffers[symbol].append(candle)
 
-        logger.debug(
+        logger.info(
             f"Completed bar",
             extra={
                 "symbol": symbol,
