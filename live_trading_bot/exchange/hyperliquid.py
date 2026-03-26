@@ -18,7 +18,10 @@ from .types import (
     Ticker,
     Candle,
 )
+from monitoring.logger import get_logger
 from config import get_settings
+
+logger = get_logger(__name__)
 
 
 class HyperliquidClient:
@@ -60,7 +63,7 @@ class HyperliquidClient:
 
     async def _request(
         self, endpoint: str, data: Dict[str, Any], requires_auth: bool = False
-    ) -> Dict[str, Any]:
+    ) -> Any:
         url = f"{self.base_url}/{endpoint}"
 
         if requires_auth:
@@ -124,30 +127,85 @@ class HyperliquidClient:
         result = await self._request("info", data)
 
         if isinstance(result, list) and len(result) > 1:
-            meta = result[0]
-            asset_ctxs = result[1]
+            meta: Dict[str, Any] = result[0]
+            asset_ctxs: list = result[1]
 
             for i, coin_info in enumerate(meta.get("universe", [])):
                 if coin_info.get("name") == symbol:
                     if i < len(asset_ctxs):
-                        return float(asset_ctxs[i].get("markPx", 0))
+                        ctx: Dict[str, Any] = asset_ctxs[i]
+                        return float(ctx.get("markPx", 0))
         return 0.0
 
     async def get_all_mid_prices(self) -> Dict[str, float]:
         data = {"type": "metaAndAssetCtxs"}
         result = await self._request("info", data)
 
-        prices = {}
+        prices: Dict[str, float] = {}
         if isinstance(result, list) and len(result) > 1:
-            meta = result[0]
-            asset_ctxs = result[1]
+            meta: Dict[str, Any] = result[0]
+            asset_ctxs: list = result[1]
 
             for i, coin_info in enumerate(meta.get("universe", [])):
                 symbol = coin_info.get("name")
                 if symbol and i < len(asset_ctxs):
-                    prices[symbol] = float(asset_ctxs[i].get("markPx", 0))
+                    ctx: Dict[str, Any] = asset_ctxs[i]
+                    prices[symbol] = float(ctx.get("markPx", 0))
 
         return prices
+
+    async def _name_to_asset_index(self) -> Dict[str, int]:
+        data = {"type": "metaAndAssetCtxs"}
+        result = await self._request("info", data)
+
+        name_to_idx: Dict[str, int] = {}
+        if isinstance(result, list) and len(result) > 0:
+            meta: Dict[str, Any] = result[0]
+            for i, coin_info in enumerate(meta.get("universe", [])):
+                symbol = coin_info.get("name")
+                if symbol:
+                    name_to_idx[symbol] = i
+
+        return name_to_idx
+
+    async def set_leverage(self, symbol: str, leverage: int):
+        """Set leverage for a symbol. Leverage must be an integer."""
+        name_to_idx = await self._name_to_asset_index()
+
+        if symbol not in name_to_idx:
+            raise ValueError(f"Symbol {symbol} not found in exchange universe")
+
+        asset_index = name_to_idx[symbol]
+
+        action = {
+            "type": "updateLeverage",
+            "asset": asset_index,
+            "isCross": True,
+            "leverage": leverage,
+        }
+
+        result = await self._request("exchange", {"action": action}, requires_auth=True)
+
+        logger.info(
+            f"Set leverage",
+            extra={
+                "symbol": symbol,
+                "leverage": leverage,
+                "asset_index": asset_index,
+                "status": "ok",
+            },
+        )
+        return result
+
+    async def set_leverage_for_symbols(self, symbols: List[str], leverage: int):
+        for symbol in symbols:
+            try:
+                await self.set_leverage(symbol, leverage)
+            except Exception as e:
+                logger.error(
+                    f"Failed to set leverage",
+                    extra={"symbol": symbol, "error": str(e)},
+                )
 
     async def place_order(
         self,
@@ -188,25 +246,61 @@ class HyperliquidClient:
         result = await self._request("exchange", {"action": action}, requires_auth=True)
 
         response_data = result.get("response", {}).get("data", {})
-        statuses = response_data.get("statuses", [[]])
+        statuses = response_data.get("statuses", [])
 
-        if statuses and statuses[0] == "Success":
-            rest = response_data.get("rest", [])
-            order_id = rest[0].get("oid") if rest else str(self._get_nonce())
+        if statuses and isinstance(statuses[0], dict):
+            status = statuses[0]
 
-            return Order(
-                id=str(order_id),
-                symbol=symbol,
-                side=side,
-                order_type=order_type,
-                size=size,
-                price=price,
-                status=OrderStatus.FILLED,
-                filled_size=size,
-                avg_fill_price=price or await self.get_mid_price(symbol),
-            )
+            if "filled" in status:
+                filled_data = status["filled"]
+                filled_size = float(filled_data.get("totalSz", 0))
+                avg_fill_price = float(filled_data.get("avgPx", 0))
+                order_id = filled_data.get("oid", self._get_nonce())
+
+                fill_status = (
+                    OrderStatus.PARTIALLY_FILLED
+                    if filled_size < size
+                    else OrderStatus.FILLED
+                )
+
+                return Order(
+                    id=str(order_id),
+                    symbol=symbol,
+                    side=side,
+                    order_type=order_type,
+                    size=size,
+                    price=price,
+                    status=fill_status,
+                    filled_size=filled_size,
+                    avg_fill_price=avg_fill_price,
+                )
+            elif "error" in status:
+                error_msg = status["error"]
+                logger.error(
+                    f"Order rejected",
+                    extra={"symbol": symbol, "error": error_msg},
+                )
+                return Order(
+                    id=str(self._get_nonce()),
+                    symbol=symbol,
+                    side=side,
+                    order_type=order_type,
+                    size=size,
+                    price=price,
+                    status=OrderStatus.REJECTED,
+                )
+            else:
+                return Order(
+                    id=str(self._get_nonce()),
+                    symbol=symbol,
+                    side=side,
+                    order_type=order_type,
+                    size=size,
+                    price=price,
+                    status=OrderStatus.REJECTED,
+                )
         else:
-            error_msg = statuses[0] if statuses else "Unknown error"
+            error_msg = str(statuses[0]) if statuses else "Unknown error"
             return Order(
                 id=str(self._get_nonce()),
                 symbol=symbol,
@@ -243,9 +337,12 @@ class HyperliquidClient:
         data = {"type": "openOrders", "user": self.wallet_address}
         result = await self._request("info", data)
 
-        orders = []
-        for order_data in result:
+        orders: List[Order] = []
+        for raw in result:
+            order_data: Dict[str, Any] = raw  # type: ignore[assignment]
             coin = order_data.get("coin")
+            if not coin:
+                continue
             if symbol and coin != symbol:
                 continue
 
@@ -279,13 +376,14 @@ class HyperliquidClient:
         result = await self._request("info", data)
 
         if isinstance(result, list) and len(result) > 1:
-            meta = result[0]
-            asset_ctxs = result[1]
+            meta: Dict[str, Any] = result[0]
+            asset_ctxs: list = result[1]
 
             for i, coin_info in enumerate(meta.get("universe", [])):
                 if coin_info.get("name") == symbol:
                     if i < len(asset_ctxs):
-                        return float(asset_ctxs[i].get("funding", 0))
+                        ctx: Dict[str, Any] = asset_ctxs[i]
+                        return float(ctx.get("funding", 0))
         return 0.0
 
     async def get_recent_candles(
@@ -299,7 +397,13 @@ class HyperliquidClient:
         if end_time is None:
             end_time = int(time.time() * 1000)
         if start_time is None:
-            start_time = end_time - (limit * 3600 * 1000)
+            interval_minutes = 60
+            unit = interval[-1]
+            if unit == "m":
+                interval_minutes = 1
+            elif unit == "s":
+                interval_minutes = 1
+            start_time = end_time - (limit * interval_minutes * 60 * 1000)
 
         data = {
             "type": "candleSnapshot",
@@ -312,8 +416,9 @@ class HyperliquidClient:
         }
         result = await self._request("info", data)
 
-        candles = []
-        for bar in result:
+        candles: List[Candle] = []
+        for raw in result:
+            bar: Dict[str, Any] = raw  # type: ignore[assignment]
             candles.append(
                 Candle(
                     symbol=symbol,
@@ -326,5 +431,15 @@ class HyperliquidClient:
                     funding_rate=0.0,
                 )
             )
+
+        if candles:
+            try:
+                current_funding = await self.get_funding_rate(symbol)
+                candles[-1].funding_rate = current_funding
+            except Exception as e:
+                logger.warning(
+                    f"Failed to fetch funding rate for candle",
+                    extra={"symbol": symbol, "error": str(e)},
+                )
 
         return sorted(candles, key=lambda x: x.timestamp)
