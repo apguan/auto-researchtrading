@@ -1,1 +1,1 @@
-from .ensemble import EnsembleStrategy
+from .adapter import LiveStrategyAdapter as EnsembleStrategy
