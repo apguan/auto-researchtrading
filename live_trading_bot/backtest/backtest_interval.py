@@ -11,8 +11,16 @@ Use --download to fetch fresh data from Hyperliquid instead.
 import os
 import sys
 import time
+from pathlib import Path
 import numpy as np
 import pandas as pd
+
+_repo_root = Path(__file__).resolve().parent.parent.parent
+_bot_root = Path(__file__).resolve().parent.parent
+for _p in (_bot_root, _repo_root):
+    sp = str(_p)
+    if sp not in sys.path:
+        sys.path.insert(0, sp)
 import requests
 
 from prepare import BarData, Signal, PortfolioState
@@ -39,9 +47,7 @@ HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 
 
 def default_data_dir(interval: str = "1m") -> str:
-    return os.path.join(
-        os.path.dirname(__file__), "backtest_data", f"{interval}_candles"
-    )
+    return os.path.join(_bot_root, "backtest_data", f"{interval}_candles")
 
 
 def cache_data_dir(interval: str = "1m") -> str:

@@ -3,8 +3,16 @@ import time
 import itertools
 import json
 import argparse
+from pathlib import Path
 import numpy as np
 import pandas as pd
+
+_repo_root = Path(__file__).resolve().parent.parent.parent
+_bot_root = Path(__file__).resolve().parent.parent
+for _p in (_bot_root, _repo_root):
+    sp = str(_p)
+    if sp not in sys.path:
+        sys.path.insert(0, sp)
 
 from backtest_interval import run_backtest_1m, load_data
 import strategies.strategy_15m as s15m
@@ -276,7 +284,9 @@ def main():
     )
     args = parser.parse_args()
 
-    data = load_data(interval="15m", data_dir="backtest_data/15m_candles")
+    data = load_data(
+        interval="15m", data_dir=str(_bot_root / "backtest_data" / "15m_candles")
+    )
     if not data:
         print("ERROR: No data loaded")
         sys.exit(1)
