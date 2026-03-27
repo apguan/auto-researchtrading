@@ -315,14 +315,14 @@ Note: Baseline OOS PF was anomalously high (26.75 vs IS PF=11.26). Tuned params 
 
 ```bash
 # 15m (recommended)
-uv run python backtest_interval.py --interval 15m --strategy strategies.strategy_15m
+uv run python backtest/backtest_interval.py --interval 15m --strategy strategies.strategy_15m
 
 # 5m
-uv run python backtest_interval.py --interval 5m --strategy strategies.strategy_5m
+uv run python backtest/backtest_interval.py --interval 5m --strategy strategies.strategy_5m
 
 # 1m
-uv run python backtest_interval.py --interval 1m --strategy strategies.strategy_1m
+uv run python backtest/backtest_interval.py --interval 1m --strategy strategies.strategy_1m
 
 # Download fresh data before running
-uv run python backtest_interval.py --interval 15m --strategy strategies.strategy_15m --download --hours 1080
+uv run python backtest/backtest_interval.py --interval 15m --strategy strategies.strategy_15m --download --hours 1080
 ```

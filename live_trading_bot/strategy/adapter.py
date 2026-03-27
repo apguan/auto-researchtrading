@@ -8,9 +8,6 @@ import pandas as pd
 
 repo_root = Path(__file__).resolve().parent.parent.parent
 
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
 if "prepare" not in sys.modules:
     _p_spec = importlib.util.spec_from_file_location(
         "prepare", repo_root / "prepare.py"
