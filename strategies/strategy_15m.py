@@ -12,11 +12,11 @@ MED2_WINDOW = 96  # 24h
 LONG_WINDOW = 144  # 36h
 EMA_FAST = 28  # 7h
 EMA_SLOW = 104  # 26h
-RSI_PERIOD = 32  # 8h
+RSI_PERIOD = 28  # 7h
 RSI_BULL = 50
 RSI_BEAR = 50
-RSI_OVERBOUGHT = 69
-RSI_OVERSOLD = 31
+RSI_OVERBOUGHT = 65
+RSI_OVERSOLD = 35
 
 MACD_FAST = 56  # 14h
 MACD_SLOW = 92  # 23h
@@ -30,7 +30,7 @@ BASE_POSITION_PCT = 2.00
 VOL_LOOKBACK = 144  # 36h
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 96  # 24h
-ATR_STOP_MULT = 5.5
+ATR_STOP_MULT = 8.0
 TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
 BTC_OPPOSE_THRESHOLD = -99.0
@@ -43,8 +43,13 @@ HIGH_CORR_THRESHOLD = 99.0
 DD_REDUCE_THRESHOLD = 99.0
 DD_REDUCE_SCALE = 0.5
 
-COOLDOWN_BARS = 8  # 2h cooldown
-MIN_VOTES = 4
+COOLDOWN_BARS = 12  # 3h cooldown
+MIN_VOTES = 5
+
+# Tunable thresholds (were hardcoded in on_bar)
+THRESHOLD_MIN = 0.005
+THRESHOLD_MAX = 0.020
+BB_COMPRESS_PCTILE = 90
 
 
 def ema(values, span):
@@ -175,7 +180,7 @@ class Strategy:
             realized_vol = self._calc_vol(closes, VOL_LOOKBACK)
             vol_ratio = realized_vol / TARGET_VOL
             dyn_threshold = BASE_THRESHOLD * (0.3 + vol_ratio * 0.7)
-            dyn_threshold = max(0.005, min(0.020, dyn_threshold))
+            dyn_threshold = max(THRESHOLD_MIN, min(THRESHOLD_MAX, dyn_threshold))
 
             ret_vshort = (closes[-1] - closes[-SHORT_WINDOW]) / closes[-SHORT_WINDOW]
             ret_short = (closes[-1] - closes[-MED_WINDOW]) / closes[-MED_WINDOW]
@@ -201,7 +206,7 @@ class Strategy:
             macd_bear = macd_hist < 0
 
             bb_pctile = self._calc_bb_width_pctile(closes, BB_PERIOD)
-            bb_compressed = bb_pctile < 90
+            bb_compressed = bb_pctile < BB_COMPRESS_PCTILE
 
             bull_votes = sum(
                 [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed]
