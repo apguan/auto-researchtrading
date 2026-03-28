@@ -1,10 +1,8 @@
-import asyncio
+import asyncpg
 from datetime import datetime
 from typing import List, Optional, Dict
-import aiosqlite
-import json
 
-from .models import Trade, Position, SignalRecord, RiskEvent
+from .models import Trade, Position, SignalRecord, RiskEvent, ParamSnapshot, ParamValue
 from config import get_settings
 from monitoring.logger import get_logger
 
@@ -12,107 +10,53 @@ logger = get_logger(__name__)
 
 
 class Database:
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self):
         self.settings = get_settings()
-        self.db_path = db_path or self.settings.DB_PATH
-        self._db: Optional[aiosqlite.Connection] = None
-        self._lock = asyncio.Lock()
+        self._pool: Optional[asyncpg.Pool] = None
 
     @property
-    def db(self) -> aiosqlite.Connection:
-        assert self._db is not None, "Database not connected. Call connect() first."
-        return self._db
+    def pool(self) -> asyncpg.Pool:
+        assert self._pool is not None, "Database not connected. Call connect() first."
+        return self._pool
 
     async def connect(self):
-        async with self._lock:
-            self._db = await aiosqlite.connect(self.db_path)
-            await self._create_tables()
-            logger.info(f"Connected to database", extra={"path": self.db_path})
+        self._pool = await asyncpg.create_pool(
+            dsn=self.settings.SUPABASE_DB_URL,
+            min_size=1,
+            max_size=5,
+        )
+        logger.info("Connected to Supabase PostgreSQL")
 
     async def close(self):
-        async with self._lock:
-            if self._db:
-                await self.db.close()
-                self._db = None
-                logger.info("Database connection closed")
+        if self._pool:
+            await self._pool.close()
+            self._pool = None
+            logger.info("Database connection pool closed")
 
-    async def _create_tables(self):
-        await self.db.executescript("""
-            CREATE TABLE IF NOT EXISTS trades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                side TEXT NOT NULL,
-                size REAL NOT NULL,
-                price REAL NOT NULL,
-                fee REAL NOT NULL,
-                pnl REAL,
-                strategy_signal TEXT,
-                order_id TEXT
-            );
-            
-            CREATE TABLE IF NOT EXISTS positions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT UNIQUE NOT NULL,
-                size REAL NOT NULL,
-                entry_price REAL NOT NULL,
-                current_price REAL NOT NULL,
-                unrealized_pnl REAL NOT NULL,
-                side TEXT NOT NULL,
-                last_updated TEXT NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                signal_type TEXT NOT NULL,
-                target_position REAL NOT NULL,
-                current_position REAL NOT NULL,
-                executed INTEGER NOT NULL
-            );
-            
-            CREATE TABLE IF NOT EXISTS risk_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                details TEXT NOT NULL,
-                action_taken TEXT
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
-            CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_risk_events_timestamp ON risk_events(timestamp);
-        """)
-        await self.db.commit()
+    # --- Trades ---
 
     async def insert_trade(self, trade: Trade) -> int:
-        async with self._lock:
-            cursor = await self.db.execute(
-                """
-                INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    trade.timestamp.isoformat(),
-                    trade.symbol,
-                    trade.side,
-                    trade.size,
-                    trade.price,
-                    trade.fee,
-                    trade.pnl,
-                    trade.strategy_signal,
-                    trade.order_id,
-                ),
-            )
-            await self.db.commit()
-            trade_id = cursor.lastrowid
-            logger.debug(
-                f"Inserted trade", extra={"trade_id": trade_id, "symbol": trade.symbol}
-            )
-            assert trade_id is not None
-            return trade_id
+        row = await self.pool.fetchrow(
+            """
+            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id
+            """,
+            trade.timestamp,
+            trade.symbol,
+            trade.side,
+            trade.size,
+            trade.price,
+            trade.fee,
+            trade.pnl,
+            trade.strategy_signal,
+            trade.order_id,
+        )
+        trade_id = row["id"]
+        logger.debug(
+            "Inserted trade", extra={"trade_id": trade_id, "symbol": trade.symbol}
+        )
+        return trade_id
 
     async def get_trades(
         self,
@@ -121,158 +65,262 @@ class Database:
         end_time: Optional[datetime] = None,
         limit: int = 1000,
     ) -> List[Trade]:
-        query = "SELECT * FROM trades WHERE 1=1"
+        conditions = []
         params = []
+        idx = 1
 
         if symbol:
-            query += " AND symbol = ?"
+            conditions.append(f"symbol = ${idx}")
             params.append(symbol)
+            idx += 1
         if start_time:
-            query += " AND timestamp >= ?"
-            params.append(start_time.isoformat())
+            conditions.append(f"timestamp >= ${idx}")
+            params.append(start_time)
+            idx += 1
         if end_time:
-            query += " AND timestamp <= ?"
-            params.append(end_time.isoformat())
+            conditions.append(f"timestamp <= ${idx}")
+            params.append(end_time)
+            idx += 1
 
-        query += " ORDER BY timestamp DESC LIMIT ?"
+        where = " AND ".join(conditions) if conditions else "TRUE"
         params.append(limit)
 
-        async with self._lock:
-            async with self.db.execute(query, params) as cursor:
-                rows = await cursor.fetchall()
-                return [
-                    Trade(
-                        id=row[0],
-                        timestamp=datetime.fromisoformat(row[1]),
-                        symbol=row[2],
-                        side=row[3],
-                        size=row[4],
-                        price=row[5],
-                        fee=row[6],
-                        pnl=row[7],
-                        strategy_signal=row[8],
-                        order_id=row[9],
-                    )
-                    for row in rows
-                ]
+        query = (
+            f"SELECT * FROM trades WHERE {where} ORDER BY timestamp DESC LIMIT ${idx}"
+        )
+        rows = await self.pool.fetch(query, *params)
+        return [
+            Trade(
+                id=row["id"],
+                timestamp=row["timestamp"],
+                symbol=row["symbol"],
+                side=row["side"],
+                size=row["size"],
+                price=row["price"],
+                fee=row["fee"],
+                pnl=row["pnl"],
+                strategy_signal=row["strategy_signal"],
+                order_id=row["order_id"],
+            )
+            for row in rows
+        ]
+
+    # --- Positions ---
 
     async def upsert_position(self, position: Position):
-        async with self._lock:
-            await self.db.execute(
-                """
-                INSERT INTO positions (symbol, size, entry_price, current_price, unrealized_pnl, side, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol) DO UPDATE SET
-                    size = excluded.size,
-                    entry_price = excluded.entry_price,
-                    current_price = excluded.current_price,
-                    unrealized_pnl = excluded.unrealized_pnl,
-                    side = excluded.side,
-                    last_updated = excluded.last_updated
-                """,
-                (
-                    position.symbol,
-                    position.size,
-                    position.entry_price,
-                    position.current_price,
-                    position.unrealized_pnl,
-                    position.side,
-                    position.last_updated.isoformat(),
-                ),
-            )
-            await self.db.commit()
+        await self.pool.execute(
+            """
+            INSERT INTO positions (symbol, size, entry_price, current_price, unrealized_pnl, side, last_updated)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (symbol) DO UPDATE SET
+                size = EXCLUDED.size,
+                entry_price = EXCLUDED.entry_price,
+                current_price = EXCLUDED.current_price,
+                unrealized_pnl = EXCLUDED.unrealized_pnl,
+                side = EXCLUDED.side,
+                last_updated = EXCLUDED.last_updated
+            """,
+            position.symbol,
+            position.size,
+            position.entry_price,
+            position.current_price,
+            position.unrealized_pnl,
+            position.side,
+            position.last_updated,
+        )
 
     async def delete_position(self, symbol: str):
-        async with self._lock:
-            await self.db.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
-            await self.db.commit()
+        await self.pool.execute("DELETE FROM positions WHERE symbol = $1", symbol)
 
     async def get_all_positions(self) -> Dict[str, Position]:
-        async with self._lock:
-            async with self.db.execute("SELECT * FROM positions") as cursor:
-                rows = await cursor.fetchall()
-                return {
-                    row[1]: Position(
-                        id=row[0],
-                        symbol=row[1],
-                        size=row[2],
-                        entry_price=row[3],
-                        current_price=row[4],
-                        unrealized_pnl=row[5],
-                        side=row[6],
-                        last_updated=datetime.fromisoformat(row[7]),
-                    )
-                    for row in rows
-                }
+        rows = await self.pool.fetch("SELECT * FROM positions")
+        return {
+            row["symbol"]: Position(
+                id=row["id"],
+                symbol=row["symbol"],
+                size=row["size"],
+                entry_price=row["entry_price"],
+                current_price=row["current_price"],
+                unrealized_pnl=row["unrealized_pnl"],
+                side=row["side"],
+                last_updated=row["last_updated"],
+            )
+            for row in rows
+        }
+
+    # --- Signals ---
 
     async def insert_signal(self, signal: SignalRecord) -> int:
-        async with self._lock:
-            cursor = await self.db.execute(
-                """
-                INSERT INTO signals (timestamp, symbol, signal_type, target_position, current_position, executed)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    signal.timestamp.isoformat(),
-                    signal.symbol,
-                    signal.signal_type,
-                    signal.target_position,
-                    signal.current_position,
-                    1 if signal.executed else 0,
-                ),
-            )
-            await self.db.commit()
-            assert cursor.lastrowid is not None
-            return cursor.lastrowid
+        row = await self.pool.fetchrow(
+            """
+            INSERT INTO signals (timestamp, symbol, signal_type, target_position, current_position, executed)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            """,
+            signal.timestamp,
+            signal.symbol,
+            signal.signal_type,
+            signal.target_position,
+            signal.current_position,
+            signal.executed,
+        )
+        return row["id"]
+
+    # --- Risk Events ---
 
     async def insert_risk_event(self, event: RiskEvent) -> int:
-        async with self._lock:
-            cursor = await self.db.execute(
-                """
-                INSERT INTO risk_events (timestamp, event_type, details, action_taken)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    event.timestamp.isoformat(),
-                    event.event_type,
-                    event.details,
-                    event.action_taken,
-                ),
-            )
-            await self.db.commit()
-            logger.warning(
-                f"Risk event recorded",
-                extra={"event_type": event.event_type, "details": event.details},
-            )
-            assert cursor.lastrowid is not None
-            return cursor.lastrowid
+        row = await self.pool.fetchrow(
+            """
+            INSERT INTO risk_events (timestamp, event_type, details, action_taken)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            event.timestamp,
+            event.event_type,
+            event.details,
+            event.action_taken,
+        )
+        logger.warning(
+            "Risk event recorded",
+            extra={"event_type": event.event_type, "details": event.details},
+        )
+        return row["id"]
+
+    # --- Daily Stats ---
 
     async def get_daily_pnl(self, symbol: Optional[str] = None) -> float:
         today_start = datetime.utcnow().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-
-        query = "SELECT SUM(pnl) FROM trades WHERE timestamp >= ? AND pnl IS NOT NULL"
-        params = [today_start.isoformat()]
-
         if symbol:
-            query += " AND symbol = ?"
-            params.append(symbol)
-
-        async with self._lock:
-            async with self.db.execute(query, params) as cursor:
-                result = await cursor.fetchone()
-                return result[0] if result and result[0] else 0.0
+            row = await self.pool.fetchrow(
+                "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE timestamp >= $1 AND pnl IS NOT NULL AND symbol = $2",
+                today_start,
+                symbol,
+            )
+        else:
+            row = await self.pool.fetchrow(
+                "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE timestamp >= $1 AND pnl IS NOT NULL",
+                today_start,
+            )
+        return float(row["total"])
 
     async def get_trade_count_today(self) -> int:
         today_start = datetime.utcnow().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
+        row = await self.pool.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM trades WHERE timestamp >= $1",
+            today_start,
+        )
+        return row["cnt"]
 
-        async with self._lock:
-            async with self.db.execute(
-                "SELECT COUNT(*) FROM trades WHERE timestamp >= ?",
-                (today_start.isoformat(),),
-            ) as cursor:
-                result = await cursor.fetchone()
-                return result[0] if result else 0
+    # --- Parameter Snapshots (normalized: param_snapshots + param_values) ---
+
+    async def insert_param_snapshot(
+        self,
+        snapshot: ParamSnapshot,
+        params: Dict[str, float],
+    ) -> int:
+        row = await self.pool.fetchrow(
+            """
+            INSERT INTO param_snapshots
+                (run_date, sweep_name, sharpe, total_return_pct,
+                 max_drawdown_pct, profit_factor, win_rate_pct,
+                 num_trades, ret_dd_ratio, is_best, previous_snapshot_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING id
+            """,
+            snapshot.run_date,
+            snapshot.sweep_name,
+            snapshot.sharpe,
+            snapshot.total_return_pct,
+            snapshot.max_drawdown_pct,
+            snapshot.profit_factor,
+            snapshot.win_rate_pct,
+            snapshot.num_trades,
+            snapshot.ret_dd_ratio,
+            snapshot.is_best,
+            snapshot.previous_snapshot_id,
+        )
+        snapshot_id = row["id"]
+
+        await self.pool.executemany(
+            """
+            INSERT INTO param_values (snapshot_id, param_name, param_value)
+            VALUES ($1, $2, $3)
+            """,
+            [(snapshot_id, name, value) for name, value in params.items()],
+        )
+
+        logger.debug(
+            "Inserted param snapshot",
+            extra={"snapshot_id": snapshot_id, "param_count": len(params)},
+        )
+        return snapshot_id
+
+    async def get_param_history(self, limit: int = 30) -> List[ParamSnapshot]:
+        rows = await self.pool.fetch(
+            "SELECT * FROM param_snapshots ORDER BY run_date DESC LIMIT $1",
+            limit,
+        )
+        snapshots = []
+        for row in rows:
+            snap = ParamSnapshot(
+                id=row["id"],
+                run_date=row["run_date"],
+                sweep_name=row["sweep_name"],
+                sharpe=row["sharpe"],
+                total_return_pct=row["total_return_pct"],
+                max_drawdown_pct=row["max_drawdown_pct"],
+                profit_factor=row["profit_factor"],
+                win_rate_pct=row["win_rate_pct"],
+                num_trades=row["num_trades"],
+                ret_dd_ratio=row["ret_dd_ratio"],
+                is_best=row["is_best"],
+                previous_snapshot_id=row["previous_snapshot_id"],
+            )
+            snapshots.append(snap)
+
+        if snapshots:
+            snap_ids = [s.id for s in snapshots]
+            val_rows = await self.pool.fetch(
+                "SELECT snapshot_id, param_name, param_value FROM param_values WHERE snapshot_id = ANY($1)",
+                snap_ids,
+            )
+            by_snap: Dict[int, Dict[str, float]] = {}
+            for vr in val_rows:
+                by_snap.setdefault(vr["snapshot_id"], {})[vr["param_name"]] = vr[
+                    "param_value"
+                ]
+            for snap in snapshots:
+                snap.params = by_snap.get(snap.id, {})
+
+        return snapshots
+
+    async def get_latest_params(self) -> Optional[ParamSnapshot]:
+        row = await self.pool.fetchrow(
+            "SELECT * FROM param_snapshots WHERE is_best = TRUE ORDER BY run_date DESC LIMIT 1"
+        )
+        if row is None:
+            return None
+        snap = ParamSnapshot(
+            id=row["id"],
+            run_date=row["run_date"],
+            sweep_name=row["sweep_name"],
+            sharpe=row["sharpe"],
+            total_return_pct=row["total_return_pct"],
+            max_drawdown_pct=row["max_drawdown_pct"],
+            profit_factor=row["profit_factor"],
+            win_rate_pct=row["win_rate_pct"],
+            num_trades=row["num_trades"],
+            ret_dd_ratio=row["ret_dd_ratio"],
+            is_best=row["is_best"],
+            previous_snapshot_id=row["previous_snapshot_id"],
+        )
+        val_rows = await self.pool.fetch(
+            "SELECT param_name, param_value FROM param_values WHERE snapshot_id = $1",
+            snap.id,
+        )
+        snap.params = {vr["param_name"]: vr["param_value"] for vr in val_rows}
+        return snap

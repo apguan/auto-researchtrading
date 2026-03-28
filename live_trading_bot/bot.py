@@ -83,7 +83,7 @@ class TradingBot:
             },
         )
 
-        self.db = Database(self.settings.DB_PATH)
+        self.db = Database()
         await self.db.connect()
 
         private_key = get_private_key()
