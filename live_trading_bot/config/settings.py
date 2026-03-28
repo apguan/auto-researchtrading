@@ -61,6 +61,19 @@ class Settings:
     DRY_RUN: bool = False
     DRY_RUN_INITIAL_CAPITAL: float = 100_000.0
 
+    # Tick execution settings
+    TICK_EXECUTION_ENABLED: bool = False
+    ENTRY_SLIPPAGE_PCT: float = 0.02
+    EXECUTION_COOLDOWN_MS: int = 5000
+
+    # Safety net settings
+    EMERGENCY_EXIT_PCT: float = 0.10
+    STOP_WIDENING_MULT: float = 1.5
+
+    # Watchdog settings
+    WATCHDOG_INTERVAL_SECONDS: int = 30
+    WATCHDOG_HEARTBEAT_PATH: str = "/tmp/trading_bot_heartbeat"
+
     RECONNECT_DELAY_SECONDS: float = 1.0
     MAX_RECONNECT_DELAY_SECONDS: float = 60.0
     REQUEST_TIMEOUT_SECONDS: float = 30.0
@@ -105,6 +118,27 @@ class Settings:
 
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
             settings.DRY_RUN_INITIAL_CAPITAL = float(val)
+
+        if val := os.getenv("TICK_EXECUTION_ENABLED"):
+            settings.TICK_EXECUTION_ENABLED = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ENTRY_SLIPPAGE_PCT"):
+            settings.ENTRY_SLIPPAGE_PCT = float(val)
+
+        if val := os.getenv("EXECUTION_COOLDOWN_MS"):
+            settings.EXECUTION_COOLDOWN_MS = int(val)
+
+        if val := os.getenv("EMERGENCY_EXIT_PCT"):
+            settings.EMERGENCY_EXIT_PCT = float(val)
+
+        if val := os.getenv("STOP_WIDENING_MULT"):
+            settings.STOP_WIDENING_MULT = float(val)
+
+        if val := os.getenv("WATCHDOG_INTERVAL_SECONDS"):
+            settings.WATCHDOG_INTERVAL_SECONDS = int(val)
+
+        if val := os.getenv("WATCHDOG_HEARTBEAT_PATH"):
+            settings.WATCHDOG_HEARTBEAT_PATH = val
 
         return settings
 

@@ -15,6 +15,8 @@ class RiskEventType(Enum):
     VOLATILITY_CIRCUIT_BREAKER = "volatility_circuit_breaker"
     POSITION_LIMIT = "position_limit"
     MANUAL_KILL_SWITCH = "manual_kill_switch"
+    EMERGENCY_EXIT = "emergency_exit"
+    STOP_TRIGGERED = "stop_triggered"
 
 
 @dataclass
