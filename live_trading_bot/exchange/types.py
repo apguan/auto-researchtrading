@@ -12,6 +12,7 @@ class OrderSide(Enum):
 class OrderType(Enum):
     MARKET = "market"
     LIMIT = "limit"
+    TRIGGER = "trigger"
 
 
 class OrderStatus(Enum):

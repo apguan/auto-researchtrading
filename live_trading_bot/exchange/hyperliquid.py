@@ -311,6 +311,91 @@ class HyperliquidClient:
                 status=OrderStatus.REJECTED,
             )
 
+    async def place_trigger_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        size: float,
+        trigger_price: float,
+        is_market: bool = True,
+        tpsl: str = "sl",
+    ) -> Order:
+        """Place a trigger/stop order on Hyperliquid."""
+        if self.dry_run:
+            return Order(
+                id=f"dry-run-trigger-{self._get_nonce()}",
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.TRIGGER,
+                size=size,
+                price=trigger_price,
+                status=OrderStatus.PENDING,
+                filled_size=0.0,
+                avg_fill_price=trigger_price,
+            )
+
+        order_data = {
+            "coin": symbol,
+            "isBuy": side == OrderSide.BUY,
+            "sz": str(size),
+            "limitPx": "0",
+            "reduceOnly": True,
+            "orderType": {
+                "trigger": {
+                    "isMarket": is_market,
+                    "triggerPx": str(trigger_price),
+                    "tpsl": tpsl,
+                }
+            },
+        }
+
+        action = {"type": "order", "orders": [order_data], "grouping": "na"}
+        result = await self._request("exchange", {"action": action}, requires_auth=True)
+
+        response_data = result.get("response", {}).get("data", {})
+        statuses = response_data.get("statuses", [])
+
+        if statuses and isinstance(statuses[0], dict):
+            status = statuses[0]
+            if "status" in status and status["status"] == "resting":
+                oid = status.get("oid", self._get_nonce())
+                return Order(
+                    id=str(oid),
+                    symbol=symbol,
+                    side=side,
+                    order_type=OrderType.TRIGGER,
+                    size=size,
+                    price=trigger_price,
+                    status=OrderStatus.PENDING,
+                    filled_size=0.0,
+                    avg_fill_price=trigger_price,
+                )
+            elif "error" in status:
+                logger.error(
+                    "Trigger order rejected",
+                    extra={"symbol": symbol, "error": status["error"]},
+                )
+                return Order(
+                    id=str(self._get_nonce()),
+                    symbol=symbol,
+                    side=side,
+                    order_type=OrderType.TRIGGER,
+                    size=size,
+                    price=trigger_price,
+                    status=OrderStatus.REJECTED,
+                )
+
+        logger.error("Unexpected trigger order response", extra={"symbol": symbol})
+        return Order(
+            id=str(self._get_nonce()),
+            symbol=symbol,
+            side=side,
+            order_type=OrderType.TRIGGER,
+            size=size,
+            price=trigger_price,
+            status=OrderStatus.REJECTED,
+        )
+
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         if self.dry_run:
             return True
@@ -347,11 +432,13 @@ class HyperliquidClient:
                 continue
 
             side = OrderSide.BUY if order_data.get("side") == "B" else OrderSide.SELL
-            order_type = (
-                OrderType.LIMIT
-                if order_data.get("orderType") == "limit"
-                else OrderType.MARKET
-            )
+            raw_ot = order_data.get("orderType")
+            if isinstance(raw_ot, dict) and "trigger" in raw_ot:
+                order_type = OrderType.TRIGGER
+            elif raw_ot == "limit":
+                order_type = OrderType.LIMIT
+            else:
+                order_type = OrderType.MARKET
 
             orders.append(
                 Order(
