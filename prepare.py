@@ -192,7 +192,7 @@ def _download_hl_funding(symbol: str, start_ms: int, end_ms: int) -> pd.DataFram
         time.sleep(0.2)
 
     if not all_rows:
-        return pd.DataFrame(columns=["timestamp", "funding_rate"])
+        return pd.DataFrame(all_rows, columns=pd.Index(["timestamp", "funding_rate"]))
     return pd.DataFrame(all_rows)
 
 
@@ -244,8 +244,8 @@ def download_data(symbols=None):
     if symbols is None:
         symbols = SYMBOLS
 
-    start_ms = int(pd.Timestamp(TRAIN_START, tz="UTC").timestamp() * 1000)
-    end_ms = int(pd.Timestamp(TEST_END, tz="UTC").timestamp() * 1000)
+    start_ms = int(pd.Timestamp(TRAIN_START, tz="UTC").asm8.item() / 1_000_000)
+    end_ms = int(pd.Timestamp(TEST_END, tz="UTC").asm8.item() / 1_000_000)
 
     for symbol in symbols:
         filepath = os.path.join(DATA_DIR, f"{symbol}_1h.parquet")
@@ -301,8 +301,8 @@ def load_data(split: str = "val") -> dict:
     }
     assert split in splits, f"split must be one of {list(splits.keys())}"
     start_str, end_str = splits[split]
-    start_ms = int(pd.Timestamp(start_str, tz="UTC").timestamp() * 1000)
-    end_ms = int(pd.Timestamp(end_str, tz="UTC").timestamp() * 1000)
+    start_ms = int(pd.Timestamp(start_str, tz="UTC").asm8.item() / 1_000_000)
+    end_ms = int(pd.Timestamp(end_str, tz="UTC").asm8.item() / 1_000_000)
 
     result = {}
     for symbol in SYMBOLS:
@@ -473,6 +473,7 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
             # Update position
             if sig.target_position == 0:
                 # Closing position — realize PnL
+                pnl = 0.0
                 if sig.symbol in portfolio.entry_prices:
                     entry = portfolio.entry_prices[sig.symbol]
                     if entry > 0:
@@ -487,7 +488,7 @@ def run_backtest(strategy, data: dict) -> BacktestResult:
                         sig.symbol,
                         delta,
                         exec_price,
-                        pnl if "pnl" in dir() else 0,
+                        pnl,
                     )
                 )
             else:
