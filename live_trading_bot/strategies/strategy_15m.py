@@ -1,6 +1,6 @@
 """15-minute resolution strategy — scaled from hourly base (1 hour = 4 bars)."""
 
-import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -350,16 +350,12 @@ class Strategy:
         return signals
 
 
-def _load_params_from_config():
-    """Load strategy parameters from JSON config file.
+def _load_params_from_db():
+    """Load strategy parameters from the active_params database table.
 
-    If config file exists and contains valid JSON, update module-level constants.
-    Parameters that should be integers are cast to int type.
-    Errors are handled silently to preserve default values.
+    Falls back to module-level defaults if DB is unavailable.
     """
-    config_path = (
-        Path(__file__).resolve().parent.parent / "config" / "optimized_params.json"
-    )
+    from dotenv import load_dotenv
 
     INT_PARAMS = {
         "SHORT_WINDOW",
@@ -387,17 +383,23 @@ def _load_params_from_config():
     }
 
     try:
-        if config_path.exists():
-            with open(config_path, "r") as f:
-                params = json.load(f)
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        load_dotenv(env_path)
+        db_url = os.environ.get("SUPABASE_DB_URL", "")
+        if not db_url:
+            return
 
+        from storage.active_params import load_active_params
+
+        params = load_active_params(db_url)
+        if params:
             for key, value in params.items():
                 if key in globals():
                     if key in INT_PARAMS:
                         value = int(value)
                     globals()[key] = value
-    except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
-        pass
+    except Exception as e:
+        print(f"Warning: Could not load params from DB: {e}")
 
 
-_load_params_from_config()
+_load_params_from_db()
