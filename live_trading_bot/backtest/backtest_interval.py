@@ -310,6 +310,7 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
     equity_curve = [INITIAL_CAPITAL]
     returns = []
     trade_log = []
+    signal_log = []
     total_volume = 0.0
     prev_equity = INITIAL_CAPITAL
     ring_buffers = {symbol: _RingBuffer(lookback) for symbol in data}
@@ -377,6 +378,14 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
             signals = strategy.on_bar(bar_data, portfolio)
         except Exception:
             signals = []
+
+        for sig in signals or []:
+            signal_log.append((
+                ts,
+                sig.symbol,
+                sig.target_position,
+                portfolio.positions.get(sig.symbol, 0.0),
+            ))
 
         for sig in signals or []:
             if sig.symbol not in bar_data:
@@ -520,9 +529,50 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
         "backtest_seconds": t_end - t_start,
         "equity_curve": equity_curve,
         "trade_log": trade_log,
+        "signal_log": signal_log,
         "bars_processed": len(timestamps),
         "final_equity": final_equity,
     }
+
+
+def write_snapshot(result: dict, path: str, strategy_name: str, interval: str):
+    """Write a deterministic JSON snapshot for golden-master comparison."""
+    import json
+
+    snapshot = {
+        "strategy": strategy_name,
+        "interval": interval,
+        "bars_processed": result["bars_processed"],
+        "final_equity": round(result["final_equity"], 6),
+        "total_return_pct": round(result["total_return_pct"], 6),
+        "max_drawdown_pct": round(result["max_drawdown_pct"], 6),
+        "num_trades": result["num_trades"],
+        "signals": [
+            {
+                "bar": s[0],
+                "symbol": s[1],
+                "target_position": round(s[2], 6),
+                "current_position": round(s[3], 6),
+            }
+            for s in result["signal_log"]
+        ],
+        "trades": [
+            {
+                "action": t[0],
+                "symbol": t[1],
+                "delta": round(t[2], 6),
+                "exec_price": round(t[3], 6),
+                "pnl": round(t[4], 6),
+            }
+            for t in result["trade_log"]
+        ],
+        "equity_curve": [round(e, 6) for e in result["equity_curve"]],
+    }
+
+    with open(path, "w") as f:
+        json.dump(snapshot, f, indent=2)
+    print(f"\nSnapshot written to {path}")
+    print(f"  {len(snapshot['signals'])} signals, {len(snapshot['trades'])} trades")
 
 
 def main():
@@ -555,6 +605,12 @@ def main():
         type=int,
         default=24,
         help="Hours of data to download (only with --download)",
+    )
+    parser.add_argument(
+        "--snapshot",
+        default=None,
+        metavar="PATH",
+        help="Write JSON snapshot to PATH for golden-master comparison",
     )
     args = parser.parse_args()
 
@@ -644,6 +700,11 @@ def main():
         for pct in [0, 25, 50, 75, 100]:
             idx = min(int(n * pct / 100), n - 1)
             print(f"    {pct:3d}%: ${eq[idx]:>12,.2f}")
+
+    print(f"\n  signals_recorded:  {len(result['signal_log'])}")
+
+    if args.snapshot:
+        write_snapshot(result, args.snapshot, args.strategy, interval)
 
     print("\n" + "=" * 60)
 

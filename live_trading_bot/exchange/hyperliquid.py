@@ -1,11 +1,18 @@
-import json
+"""Hyperliquid exchange client wrapping the official hyperliquid-python-sdk.
+
+Provides an async interface that returns the bot's internal types (Order,
+AccountState, etc.) while delegating signing, wire formats, and API calls
+to the SDK.
+"""
+
+import asyncio
 import time
-import hashlib
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-import httpx
+
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from hyperliquid.info import Info
+from hyperliquid.exchange import Exchange
 
 from .types import (
     Order,
@@ -15,7 +22,6 @@ from .types import (
     Position,
     PositionSide,
     AccountState,
-    Ticker,
     Candle,
 )
 from monitoring.logger import get_logger
@@ -23,62 +29,61 @@ from config import get_settings
 
 logger = get_logger(__name__)
 
+MAINNET_URL = "https://api.hyperliquid.xyz"
+
 
 class HyperliquidClient:
     def __init__(self, private_key: str, dry_run: bool = False):
         self.settings = get_settings()
-        self.private_key = private_key
         self.dry_run = dry_run
 
         self.account = Account.from_key(private_key)
         self.wallet_address = self.account.address
+        # API wallets don't hold equity — query the main wallet for account state.
+        # If HYPERLIQUID_MAIN_WALLET is unset, the PK is the main wallet's.
+        self.query_address = self.settings.HYPERLIQUID_MAIN_WALLET or self.wallet_address
 
-        self.base_url = self.settings.HYPERLIQUID_API_URL
-        self.client = httpx.AsyncClient(timeout=self.settings.REQUEST_TIMEOUT_SECONDS)
+        base_url = self.settings.HYPERLIQUID_API_URL
+
+        # Info is needed in both modes (price data, candles, account state)
+        self._info = Info(base_url=base_url, skip_ws=True)
+
+        if not dry_run:
+            self._exchange = Exchange(
+                wallet=self.account,
+                base_url=base_url,
+                account_address=self.query_address,
+            )
+        else:
+            self._exchange = None
 
         self._nonce_counter = int(time.time() * 1000)
 
+        # Cache szDecimals for each asset (fetched lazily)
+        self._sz_decimals: Dict[str, int] = {}
+
+    def _round_size(self, symbol: str, size: float) -> float:
+        """Round order size to the asset's szDecimals precision."""
+        if symbol not in self._sz_decimals:
+            meta = self._info.meta()
+            for asset in meta.get("universe", []):
+                self._sz_decimals[asset["name"]] = asset.get("szDecimals", 0)
+        decimals = self._sz_decimals.get(symbol, 0)
+        return round(size, decimals)
+
     async def close(self):
-        await self.client.aclose()
+        pass
 
     def _get_nonce(self) -> int:
         self._nonce_counter += 1
         return self._nonce_counter
 
-    def _sign_l1_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        connection_id = hashlib.sha256(b"mainnet").hexdigest()
-
-        msg = json.dumps(
-            {
-                "source": self.wallet_address,
-                "connectionId": connection_id,
-                "payload": action,
-            },
-            separators=(",", ":"),
-        )
-
-        signed = self.account.sign_message(encode_defunct(text=msg))
-
-        return {"r": hex(signed.r), "s": hex(signed.s), "v": signed.v}
-
-    async def _request(
-        self, endpoint: str, data: Dict[str, Any], requires_auth: bool = False
-    ) -> Any:
-        url = f"{self.base_url}/{endpoint}"
-
-        if requires_auth:
-            signature = self._sign_l1_action(data)
-            data["signature"] = signature
-
-        response = await self.client.post(url, json=data)
-        response.raise_for_status()
-        return response.json()
+    # ── Account state ──────────────────────────────────────────────
 
     async def get_account_state(self) -> AccountState:
-        data = {"type": "clearinghouseState", "user": self.wallet_address}
-        result = await self._request("info", data)
+        result = await asyncio.to_thread(self._info.user_state, self.query_address)
 
-        positions = {}
+        positions: Dict[str, Position] = {}
         margin_summary = result.get("marginSummary", {})
         account_value = float(margin_summary.get("accountValue", 0))
         available_balance = float(margin_summary.get("availableBalance", 0))
@@ -97,7 +102,8 @@ class HyperliquidClient:
             entry_price = float(pos_info.get("entryPx", 0))
             mark_price = float(pos_info.get("markPx", 0))
             unrealized_pnl = float(pos_info.get("unrealizedPnl", 0))
-            leverage = float(pos_info.get("leverage", {}).get("value", 1))
+            leverage_raw = pos_info.get("leverage", {})
+            leverage_val = float(leverage_raw.get("value", 1)) if isinstance(leverage_raw, dict) else float(leverage_raw)
             margin_used = float(pos_info.get("marginUsed", 0))
             liq_price = pos_info.get("liquidationPx")
 
@@ -108,13 +114,13 @@ class HyperliquidClient:
                 entry_price=entry_price,
                 current_price=mark_price,
                 unrealized_pnl=unrealized_pnl,
-                leverage=leverage,
+                leverage=leverage_val,
                 margin_used=margin_used,
                 liquidation_price=float(liq_price) if liq_price else None,
             )
 
         return AccountState(
-            wallet_address=self.wallet_address,
+            wallet_address=self.query_address,
             total_equity=account_value,
             available_balance=available_balance,
             margin_used=account_value - available_balance,
@@ -122,78 +128,28 @@ class HyperliquidClient:
             positions=positions,
         )
 
+    # ── Prices ─────────────────────────────────────────────────────
+
     async def get_mid_price(self, symbol: str) -> float:
-        data = {"type": "metaAndAssetCtxs"}
-        result = await self._request("info", data)
-
-        if isinstance(result, list) and len(result) > 1:
-            meta: Dict[str, Any] = result[0]
-            asset_ctxs: list = result[1]
-
-            for i, coin_info in enumerate(meta.get("universe", [])):
-                if coin_info.get("name") == symbol:
-                    if i < len(asset_ctxs):
-                        ctx: Dict[str, Any] = asset_ctxs[i]
-                        return float(ctx.get("markPx", 0))
-        return 0.0
+        mids = await asyncio.to_thread(self._info.all_mids)
+        price_str = mids.get(symbol, "0")
+        return float(price_str)
 
     async def get_all_mid_prices(self) -> Dict[str, float]:
-        data = {"type": "metaAndAssetCtxs"}
-        result = await self._request("info", data)
+        mids = await asyncio.to_thread(self._info.all_mids)
+        return {symbol: float(px) for symbol, px in mids.items()}
 
-        prices: Dict[str, float] = {}
-        if isinstance(result, list) and len(result) > 1:
-            meta: Dict[str, Any] = result[0]
-            asset_ctxs: list = result[1]
-
-            for i, coin_info in enumerate(meta.get("universe", [])):
-                symbol = coin_info.get("name")
-                if symbol and i < len(asset_ctxs):
-                    ctx: Dict[str, Any] = asset_ctxs[i]
-                    prices[symbol] = float(ctx.get("markPx", 0))
-
-        return prices
-
-    async def _name_to_asset_index(self) -> Dict[str, int]:
-        data = {"type": "metaAndAssetCtxs"}
-        result = await self._request("info", data)
-
-        name_to_idx: Dict[str, int] = {}
-        if isinstance(result, list) and len(result) > 0:
-            meta: Dict[str, Any] = result[0]
-            for i, coin_info in enumerate(meta.get("universe", [])):
-                symbol = coin_info.get("name")
-                if symbol:
-                    name_to_idx[symbol] = i
-
-        return name_to_idx
+    # ── Leverage ───────────────────────────────────────────────────
 
     async def set_leverage(self, symbol: str, leverage: int):
-        """Set leverage for a symbol. Leverage must be an integer."""
-        name_to_idx = await self._name_to_asset_index()
-
-        if symbol not in name_to_idx:
-            raise ValueError(f"Symbol {symbol} not found in exchange universe")
-
-        asset_index = name_to_idx[symbol]
-
-        action = {
-            "type": "updateLeverage",
-            "asset": asset_index,
-            "isCross": True,
-            "leverage": leverage,
-        }
-
-        result = await self._request("exchange", {"action": action}, requires_auth=True)
-
+        if self._exchange is None:
+            return
+        result = await asyncio.to_thread(
+            self._exchange.update_leverage, leverage, symbol, True
+        )
         logger.info(
-            f"Set leverage",
-            extra={
-                "symbol": symbol,
-                "leverage": leverage,
-                "asset_index": asset_index,
-                "status": "ok",
-            },
+            "Set leverage",
+            extra={"symbol": symbol, "leverage": leverage, "status": "ok"},
         )
         return result
 
@@ -203,9 +159,11 @@ class HyperliquidClient:
                 await self.set_leverage(symbol, leverage)
             except Exception as e:
                 logger.error(
-                    f"Failed to set leverage",
+                    "Failed to set leverage",
                     extra={"symbol": symbol, "error": str(e)},
                 )
+
+    # ── Orders ─────────────────────────────────────────────────────
 
     async def place_order(
         self,
@@ -229,21 +187,89 @@ class HyperliquidClient:
                 avg_fill_price=price or await self.get_mid_price(symbol),
             )
 
-        order_data = {
-            "coin": symbol,
-            "isBuy": side == OrderSide.BUY,
-            "sz": size,
-            "limitPx": price
-            if order_type == OrderType.LIMIT
-            else await self.get_mid_price(symbol)
-            * (1.01 if side == OrderSide.BUY else 0.99),
-            "reduceOnly": reduce_only,
-            "orderType": "Ioc" if order_type == OrderType.MARKET else "Limit",
+        assert self._exchange is not None
+
+        size = self._round_size(symbol, size)
+        is_buy = side == OrderSide.BUY
+        slippage = 0.05  # 5% slippage for market orders
+
+        if order_type == OrderType.MARKET:
+            limit_px = self._exchange._slippage_price(symbol, is_buy, slippage, price)
+            sdk_order_type = {"limit": {"tif": "Ioc"}}
+        else:
+            limit_px = price or await self.get_mid_price(symbol)
+            sdk_order_type = {"limit": {"tif": "Gtc"}}
+
+        result = await asyncio.to_thread(
+            self._exchange.order,
+            symbol,
+            is_buy,
+            size,
+            limit_px,
+            sdk_order_type,
+            reduce_only,
+        )
+
+        return self._parse_order_result(result, symbol, side, order_type, size, price)
+
+    async def place_trigger_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        size: float,
+        trigger_price: float,
+        is_market: bool = True,
+        tpsl: str = "sl",
+    ) -> Order:
+        if self.dry_run:
+            return Order(
+                id=f"dry-run-trigger-{self._get_nonce()}",
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.TRIGGER,
+                size=size,
+                price=trigger_price,
+                status=OrderStatus.PENDING,
+                filled_size=0.0,
+                avg_fill_price=trigger_price,
+            )
+
+        assert self._exchange is not None
+
+        size = self._round_size(symbol, size)
+
+        sdk_order_type = {
+            "trigger": {
+                "triggerPx": trigger_price,
+                "isMarket": is_market,
+                "tpsl": tpsl,
+            }
         }
 
-        action = {"type": "order", "orders": [order_data], "grouping": "na"}
+        result = await asyncio.to_thread(
+            self._exchange.order,
+            symbol,
+            side == OrderSide.BUY,
+            size,
+            trigger_price,
+            sdk_order_type,
+            True,  # reduce_only
+        )
 
-        result = await self._request("exchange", {"action": action}, requires_auth=True)
+        return self._parse_trigger_result(result, symbol, side, size, trigger_price)
+
+    def _parse_order_result(
+        self, result: Any, symbol: str, side: OrderSide,
+        order_type: OrderType, size: float, price: Optional[float],
+    ) -> Order:
+        if result is None or result.get("status") == "err":
+            error_msg = result.get("response", "Unknown error") if result else "No response"
+            logger.error("Order rejected", extra={"symbol": symbol, "error": error_msg})
+            return Order(
+                id=str(self._get_nonce()), symbol=symbol, side=side,
+                order_type=order_type, size=size, price=price,
+                status=OrderStatus.REJECTED,
+            )
 
         response_data = result.get("response", {}).get("data", {})
         statuses = response_data.get("statuses", [])
@@ -264,188 +290,123 @@ class HyperliquidClient:
                 )
 
                 return Order(
-                    id=str(order_id),
-                    symbol=symbol,
-                    side=side,
-                    order_type=order_type,
-                    size=size,
-                    price=price,
+                    id=str(order_id), symbol=symbol, side=side,
+                    order_type=order_type, size=size, price=price,
                     status=fill_status,
-                    filled_size=filled_size,
-                    avg_fill_price=avg_fill_price,
+                    filled_size=filled_size, avg_fill_price=avg_fill_price,
+                )
+            elif "resting" in status:
+                oid = status["resting"].get("oid", self._get_nonce())
+                return Order(
+                    id=str(oid), symbol=symbol, side=side,
+                    order_type=order_type, size=size, price=price,
+                    status=OrderStatus.PENDING,
                 )
             elif "error" in status:
-                error_msg = status["error"]
                 logger.error(
-                    f"Order rejected",
-                    extra={"symbol": symbol, "error": error_msg},
+                    "Order rejected",
+                    extra={"symbol": symbol, "error": status["error"]},
                 )
-                return Order(
-                    id=str(self._get_nonce()),
-                    symbol=symbol,
-                    side=side,
-                    order_type=order_type,
-                    size=size,
-                    price=price,
-                    status=OrderStatus.REJECTED,
-                )
-            else:
-                return Order(
-                    id=str(self._get_nonce()),
-                    symbol=symbol,
-                    side=side,
-                    order_type=order_type,
-                    size=size,
-                    price=price,
-                    status=OrderStatus.REJECTED,
-                )
-        else:
-            error_msg = str(statuses[0]) if statuses else "Unknown error"
+
+        return Order(
+            id=str(self._get_nonce()), symbol=symbol, side=side,
+            order_type=order_type, size=size, price=price,
+            status=OrderStatus.REJECTED,
+        )
+
+    def _parse_trigger_result(
+        self, result: Any, symbol: str, side: OrderSide,
+        size: float, trigger_price: float,
+    ) -> Order:
+        if result is None or result.get("status") == "err":
+            error_msg = result.get("response", "Unknown error") if result else "No response"
+            logger.error(
+                "Trigger order rejected",
+                extra={"symbol": symbol, "error": error_msg},
+            )
             return Order(
-                id=str(self._get_nonce()),
-                symbol=symbol,
-                side=side,
-                order_type=order_type,
-                size=size,
-                price=price,
+                id=str(self._get_nonce()), symbol=symbol, side=side,
+                order_type=OrderType.TRIGGER, size=size, price=trigger_price,
                 status=OrderStatus.REJECTED,
             )
-
-    async def place_trigger_order(
-        self,
-        symbol: str,
-        side: OrderSide,
-        size: float,
-        trigger_price: float,
-        is_market: bool = True,
-        tpsl: str = "sl",
-    ) -> Order:
-        """Place a trigger/stop order on Hyperliquid."""
-        if self.dry_run:
-            return Order(
-                id=f"dry-run-trigger-{self._get_nonce()}",
-                symbol=symbol,
-                side=side,
-                order_type=OrderType.TRIGGER,
-                size=size,
-                price=trigger_price,
-                status=OrderStatus.PENDING,
-                filled_size=0.0,
-                avg_fill_price=trigger_price,
-            )
-
-        order_data = {
-            "coin": symbol,
-            "isBuy": side == OrderSide.BUY,
-            "sz": str(size),
-            "limitPx": "0",
-            "reduceOnly": True,
-            "orderType": {
-                "trigger": {
-                    "isMarket": is_market,
-                    "triggerPx": str(trigger_price),
-                    "tpsl": tpsl,
-                }
-            },
-        }
-
-        action = {"type": "order", "orders": [order_data], "grouping": "na"}
-        result = await self._request("exchange", {"action": action}, requires_auth=True)
 
         response_data = result.get("response", {}).get("data", {})
         statuses = response_data.get("statuses", [])
 
         if statuses and isinstance(statuses[0], dict):
             status = statuses[0]
-            if "status" in status and status["status"] == "resting":
-                oid = status.get("oid", self._get_nonce())
+            if "resting" in status:
+                oid = status["resting"].get("oid", self._get_nonce())
                 return Order(
-                    id=str(oid),
-                    symbol=symbol,
-                    side=side,
-                    order_type=OrderType.TRIGGER,
-                    size=size,
-                    price=trigger_price,
-                    status=OrderStatus.PENDING,
-                    filled_size=0.0,
+                    id=str(oid), symbol=symbol, side=side,
+                    order_type=OrderType.TRIGGER, size=size, price=trigger_price,
+                    status=OrderStatus.PENDING, filled_size=0.0,
                     avg_fill_price=trigger_price,
                 )
-            elif "error" in status:
-                logger.error(
-                    "Trigger order rejected",
-                    extra={"symbol": symbol, "error": status["error"]},
-                )
-                return Order(
-                    id=str(self._get_nonce()),
-                    symbol=symbol,
-                    side=side,
-                    order_type=OrderType.TRIGGER,
-                    size=size,
-                    price=trigger_price,
-                    status=OrderStatus.REJECTED,
-                )
 
-        logger.error("Unexpected trigger order response", extra={"symbol": symbol})
         return Order(
-            id=str(self._get_nonce()),
-            symbol=symbol,
-            side=side,
-            order_type=OrderType.TRIGGER,
-            size=size,
-            price=trigger_price,
+            id=str(self._get_nonce()), symbol=symbol, side=side,
+            order_type=OrderType.TRIGGER, size=size, price=trigger_price,
             status=OrderStatus.REJECTED,
         )
+
+    # ── Cancel ─────────────────────────────────────────────────────
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         if self.dry_run:
             return True
-
-        action = {"type": "cancel", "cancels": [{"coin": symbol, "oid": int(order_id)}]}
-
-        result = await self._request("exchange", {"action": action}, requires_auth=True)
-        statuses = result.get("response", {}).get("data", {}).get("statuses", [[]])
-
-        return statuses and statuses[0] == "Success"
+        assert self._exchange is not None
+        try:
+            result = await asyncio.to_thread(
+                self._exchange.cancel, symbol, int(order_id)
+            )
+            return result.get("status") == "ok"
+        except Exception as e:
+            logger.error(
+                "Failed to cancel order",
+                extra={"symbol": symbol, "order_id": order_id, "error": str(e)},
+            )
+            return False
 
     async def cancel_all_orders(self, symbol: Optional[str] = None) -> bool:
         if self.dry_run:
             return True
 
         open_orders = await self.get_open_orders(symbol)
-
         for order in open_orders:
             await self.cancel_order(order.symbol, order.id)
-
         return True
 
+    # ── Open orders ────────────────────────────────────────────────
+
     async def get_open_orders(self, symbol: Optional[str] = None) -> List[Order]:
-        data = {"type": "openOrders", "user": self.wallet_address}
-        result = await self._request("info", data)
+        result = await asyncio.to_thread(
+            self._info.open_orders, self.query_address
+        )
 
         orders: List[Order] = []
-        for raw in result:
-            order_data: Dict[str, Any] = raw  # type: ignore[assignment]
+        for order_data in result:
             coin = order_data.get("coin")
             if not coin:
                 continue
             if symbol and coin != symbol:
                 continue
 
-            side = OrderSide.BUY if order_data.get("side") == "B" else OrderSide.SELL
+            ot_side = OrderSide.BUY if order_data.get("side") == "B" else OrderSide.SELL
             raw_ot = order_data.get("orderType")
             if isinstance(raw_ot, dict) and "trigger" in raw_ot:
-                order_type = OrderType.TRIGGER
+                ot_type = OrderType.TRIGGER
             elif raw_ot == "limit":
-                order_type = OrderType.LIMIT
+                ot_type = OrderType.LIMIT
             else:
-                order_type = OrderType.MARKET
+                ot_type = OrderType.MARKET
 
             orders.append(
                 Order(
                     id=str(order_data.get("oid", "")),
                     symbol=coin,
-                    side=side,
-                    order_type=order_type,
+                    side=ot_side,
+                    order_type=ot_type,
                     size=float(order_data.get("origSz", 0)),
                     price=float(order_data.get("limitPx", 0)),
                     status=OrderStatus.PENDING,
@@ -455,22 +416,20 @@ class HyperliquidClient:
                     ),
                 )
             )
-
         return orders
 
+    # ── Market data ────────────────────────────────────────────────
+
     async def get_funding_rate(self, symbol: str) -> float:
-        data = {"type": "metaAndAssetCtxs"}
-        result = await self._request("info", data)
+        result = await asyncio.to_thread(self._info.meta_and_asset_ctxs)
 
         if isinstance(result, list) and len(result) > 1:
-            meta: Dict[str, Any] = result[0]
-            asset_ctxs: list = result[1]
-
+            meta = result[0]
+            asset_ctxs = result[1]
             for i, coin_info in enumerate(meta.get("universe", [])):
                 if coin_info.get("name") == symbol:
                     if i < len(asset_ctxs):
-                        ctx: Dict[str, Any] = asset_ctxs[i]
-                        return float(ctx.get("funding", 0))
+                        return float(asset_ctxs[i].get("funding", 0))
         return 0.0
 
     async def get_recent_candles(
@@ -506,20 +465,13 @@ class HyperliquidClient:
         while len(all_candles) < limit and window_end > start_time:
             window_start = max(start_time, window_end - ms_per_window)
 
-            data = {
-                "type": "candleSnapshot",
-                "req": {
-                    "coin": symbol,
-                    "interval": interval,
-                    "startTime": window_start,
-                    "endTime": window_end,
-                },
-            }
-            result = await self._request("info", data)
+            result = await asyncio.to_thread(
+                self._info.candles_snapshot,
+                symbol, interval, window_start, window_end,
+            )
 
             new_candles: List[Candle] = []
-            for raw in result:
-                bar: Dict[str, Any] = raw  # type: ignore[assignment]
+            for bar in result:
                 new_candles.append(
                     Candle(
                         symbol=symbol,
@@ -540,7 +492,7 @@ class HyperliquidClient:
             all_candles.extend(new_candles)
 
             logger.info(
-                f"Fetched candle batch",
+                "Fetched candle batch",
                 extra={
                     "symbol": symbol,
                     "batch_size": len(new_candles),
@@ -566,7 +518,7 @@ class HyperliquidClient:
                 candles[-1].funding_rate = current_funding
             except Exception as e:
                 logger.warning(
-                    f"Failed to fetch funding rate for candle",
+                    "Failed to fetch funding rate for candle",
                     extra={"symbol": symbol, "error": str(e)},
                 )
 
