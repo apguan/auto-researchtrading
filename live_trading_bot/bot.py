@@ -134,10 +134,11 @@ class TradingBot:
 
         account_state = await self.client.get_account_state()
 
-        for symbol, pos in account_state.positions.items():
-            self._current_positions[symbol] = (
-                pos.size if pos.side.value == "long" else -pos.size
-            )
+        if not self.settings.DRY_RUN:
+            for symbol, pos in account_state.positions.items():
+                self._current_positions[symbol] = (
+                    pos.size if pos.side.value == "long" else -pos.size
+                )
 
         self.metrics.update(
             equity=account_state.total_equity,
