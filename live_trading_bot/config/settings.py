@@ -161,6 +161,18 @@ class Settings:
         if val := os.getenv("WATCHDOG_HEARTBEAT_PATH"):
             settings.WATCHDOG_HEARTBEAT_PATH = val
 
+        if val := os.getenv("ALERT_ON_TRADE"):
+            settings.ALERT_ON_TRADE = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ALERT_ON_ERROR"):
+            settings.ALERT_ON_ERROR = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ALERT_ON_RISK_EVENT"):
+            settings.ALERT_ON_RISK_EVENT = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ALERT_INTERVAL_HOURS"):
+            settings.ALERT_INTERVAL_HOURS = float(val)
+
         return settings
 
 

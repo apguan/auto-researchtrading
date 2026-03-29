@@ -241,16 +241,16 @@ class DataStreamer:
                 )
 
     async def _on_symbol_bar_complete(self, symbol: str, candle: Candle):
-        """Collect per-symbol bar completions into a batch."""
-        # New interval started — flush whatever we collected for the previous one
-        if self._batch_interval_ts is not None and candle.timestamp != self._batch_interval_ts:
-            await self._flush_bar_batch()
+        """Collect per-symbol bar completions into a batch.
 
+        Only fires the callback when ALL symbols have reported for the interval.
+        No early/partial flush — that was causing duplicate order execution when
+        late-arriving symbols (SOL) split the batch into two callbacks.
+        """
         self._batch_interval_ts = candle.timestamp
         self._pending_bar_symbols.add(symbol)
 
         if self._pending_bar_symbols >= set(self.symbols):
-            # All symbols reported — process immediately
             await self._flush_bar_batch()
 
     async def _flush_bar_batch(self):
@@ -262,15 +262,7 @@ class DataStreamer:
         if not symbols:
             return
 
-        missing = set(self.symbols) - set(symbols)
-        if missing:
-            logger.warning(
-                "Bar batch incomplete — some symbols did not report",
-                extra={"received": symbols, "missing": list(missing)},
-            )
-
         if self.on_bar_callback:
-            # Fire once with the first symbol as trigger — the bot processes all symbols
             await self._safe_callback(self.on_bar_callback, symbols[0],
                 self.bar_builder.get_history(symbols[0])[-1] if self.bar_builder.get_history(symbols[0]) else None)
 
