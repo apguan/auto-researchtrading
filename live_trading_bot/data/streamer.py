@@ -54,6 +54,11 @@ class DataStreamer:
         self._bar_count_since_funding_fetch: int = 0
         self._FUNDING_FETCH_INTERVAL: int = 8
 
+        # Bar batching: collect per-symbol completions, fire callback once per interval
+        self._pending_bar_symbols: set = set()
+        self._batch_timer: Optional[asyncio.TimerHandle] = None
+        self._BAR_BATCH_DELAY_S: float = 3.0
+
     async def start(self, client: Optional[HyperliquidClient] = None):
         self._running = True
         self._client = client
@@ -61,9 +66,7 @@ class DataStreamer:
         if client:
             await self._load_historical_data(client)
 
-        if self.on_bar_callback:
-            self.bar_builder.add_bar_callback(self.on_bar_callback)
-
+        self.bar_builder.add_bar_callback(self._on_symbol_bar_complete)
         self.bar_builder.add_bar_callback(self._on_bar_for_funding)
 
         while self._running:
@@ -237,6 +240,47 @@ class DataStreamer:
                     f"Failed to fetch funding rate",
                     extra={"symbol": symbol, "error": str(e)},
                 )
+
+    async def _on_symbol_bar_complete(self, symbol: str, candle: Candle):
+        """Collect per-symbol bar completions into a batch."""
+        self._pending_bar_symbols.add(symbol)
+
+        if self._batch_timer is not None:
+            self._batch_timer.cancel()
+
+        loop = asyncio.get_event_loop()
+
+        if self._pending_bar_symbols >= set(self.symbols):
+            # All symbols reported — process immediately
+            self._batch_timer = None
+            await self._flush_bar_batch()
+        else:
+            # Wait for stragglers
+            self._batch_timer = loop.call_later(
+                self._BAR_BATCH_DELAY_S,
+                lambda: loop.create_task(self._flush_bar_batch()),
+            )
+
+    async def _flush_bar_batch(self):
+        """Fire the bot callback once for the collected batch."""
+        symbols = list(self._pending_bar_symbols)
+        self._pending_bar_symbols.clear()
+        self._batch_timer = None
+
+        if not symbols:
+            return
+
+        missing = set(self.symbols) - set(symbols)
+        if missing:
+            logger.warning(
+                "Bar batch incomplete — some symbols did not report",
+                extra={"received": symbols, "missing": list(missing)},
+            )
+
+        if self.on_bar_callback:
+            # Fire once with the first symbol as trigger — the bot processes all symbols
+            await self._safe_callback(self.on_bar_callback, symbols[0],
+                self.bar_builder.get_history(symbols[0])[-1] if self.bar_builder.get_history(symbols[0]) else None)
 
     async def _on_bar_for_funding(self, symbol: str, candle: Candle):
         self._bar_count_since_funding_fetch += 1

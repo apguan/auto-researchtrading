@@ -64,15 +64,9 @@ class TradingBot:
 
         self._current_positions: Dict[str, float] = {}
         self._current_prices: Dict[str, float] = {}
-        self._last_bar_times: Dict[str, int] = {}
         self._last_summary_time: Optional[datetime] = None
         self._bar_count: int = 0
         self._last_heartbeat: float = 0
-
-        # Bar batching: collect per-symbol bar completions, process once per interval
-        self._pending_bars: set = set()
-        self._batch_timer: Optional[asyncio.TimerHandle] = None
-        self._BAR_BATCH_DELAY_S: float = 3.0  # wait this long for stragglers
 
     async def initialize(self):
         log_dir = Path(self.settings.LOG_PATH).parent
@@ -183,16 +177,11 @@ class TradingBot:
         return positions_usd
 
     async def _on_bar(self, symbol: str, candle: Candle):
+        """Called once per interval by DataStreamer after all symbols' bars are batched."""
         if not self._running:
             return
 
-        last_time = self._last_bar_times.get(symbol, 0)
-        if candle.timestamp <= last_time:
-            return
-
-        self._last_bar_times[symbol] = candle.timestamp
         self._bar_count += 1
-        self._pending_bars.add(symbol)
 
         import time as _time
         now = _time.time()
@@ -206,44 +195,17 @@ class TradingBot:
                 },
             )
 
-        # Cancel any existing batch timer and reset — wait for more symbols
-        if self._batch_timer is not None:
-            self._batch_timer.cancel()
-
-        loop = asyncio.get_event_loop()
-
-        # If all trading pairs have reported in, process immediately
-        if self._pending_bars >= set(self.settings.TRADING_PAIRS):
-            self._batch_timer = None
-            loop.create_task(self._flush_pending_bars())
-        else:
-            # Otherwise wait for stragglers
-            self._batch_timer = loop.call_later(
-                self._BAR_BATCH_DELAY_S,
-                lambda: loop.create_task(self._flush_pending_bars()),
-            )
-
-    async def _flush_pending_bars(self):
-        """Process all accumulated bar completions in a single _process_bar() call."""
-        symbols = list(self._pending_bars)
-        self._pending_bars.clear()
-        self._batch_timer = None
-
-        if not symbols:
-            return
-
         try:
             assert self.client is not None
             assert self.alerter is not None
-            await self._process_bar(triggered_by=",".join(symbols))
+            await self._process_bar(triggered_by=symbol)
         except Exception as e:
             logger.error(
-                "Error processing bar batch",
-                extra={"symbols": symbols, "error": str(e)},
+                "Error processing bar", extra={"symbol": symbol, "error": str(e)}
             )
             if self.alerter is not None:
                 await self.alerter.alert_error(
-                    str(e), context=f"Processing bar batch for {symbols}"
+                    str(e), context=f"Processing bar for {symbol}"
                 )
 
     async def _on_tick(self, symbol: str, price: float):
