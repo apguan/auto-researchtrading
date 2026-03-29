@@ -82,9 +82,8 @@ def signal_direction(target_pos: float) -> str:
     return "FLAT"
 
 
-def cleanup_live_positions(db_path: str):
-    """Close any open positions on the exchange and log to the same DB as harness_cleanup."""
-    # Import here to avoid loading bot modules unless needed
+def cleanup_live_positions(db_path: str = ""):
+    """Close any open positions on the exchange. Optionally log to DB."""
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from config import get_private_key
     from exchange.hyperliquid import HyperliquidClient, OrderSide, OrderType
@@ -99,7 +98,7 @@ def cleanup_live_positions(db_path: str):
             await client.close()
             return
 
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path) if db_path else None
         for sym, pos in state.positions.items():
             side = OrderSide.SELL if pos.side.value == "long" else OrderSide.BUY
             order = await client.place_order(
@@ -109,21 +108,23 @@ def cleanup_live_positions(db_path: str):
                 f"    Closed {sym}: {pos.size} {pos.side.value} "
                 f"@ {order.avg_fill_price} ({order.status.value})"
             )
-            conn.execute(
-                "INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, NULL, 'harness_cleanup', ?)",
-                (
-                    datetime.now(timezone.utc).isoformat(),
-                    sym,
-                    side.value,
-                    order.filled_size,
-                    order.avg_fill_price,
-                    order.filled_size * 0.0005,
-                    order.id,
-                ),
-            )
-        conn.commit()
-        conn.close()
+            if conn:
+                conn.execute(
+                    "INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, NULL, 'harness_cleanup', ?)",
+                    (
+                        datetime.now(timezone.utc).isoformat(),
+                        sym,
+                        side.value,
+                        order.filled_size,
+                        order.avg_fill_price,
+                        order.filled_size * 0.0005,
+                        order.id,
+                    ),
+                )
+        if conn:
+            conn.commit()
+            conn.close()
         await client.close()
 
     asyncio.run(_close())
@@ -269,6 +270,14 @@ def main():
         print(f"ERROR: bot.py not found at {bot_script}")
         sys.exit(1)
 
+    if args.live_runs > 0:
+        print("Closing any leftover positions...")
+        try:
+            cleanup_live_positions()
+        except Exception as e:
+            print(f"  Warning: startup cleanup failed: {e}")
+        print()
+
     work_dir = tempfile.mkdtemp(prefix="side_by_side_")
     print(f"Work directory: {work_dir}")
     print(f"Duration: {duration_secs}s")
@@ -318,11 +327,23 @@ def main():
             "proc": proc,
         })
 
+    # Handle SIGTERM (sent by Railway on redeploy) the same as KeyboardInterrupt
+    _shutdown_requested = False
+
+    def _handle_sigterm(signum, frame):
+        nonlocal _shutdown_requested
+        _shutdown_requested = True
+        print("\nSIGTERM received, shutting down...")
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     print(f"\nAll instances started. Waiting {duration_secs}s...")
     print(f"(Signals may take a minute to appear after first bar completes)\n")
 
     try:
         for elapsed in range(duration_secs):
+            if _shutdown_requested:
+                break
             time.sleep(1)
             # Check if any process died early
             for inst in instances:
