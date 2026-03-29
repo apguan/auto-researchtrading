@@ -56,8 +56,7 @@ class DataStreamer:
 
         # Bar batching: collect per-symbol completions, fire callback once per interval
         self._pending_bar_symbols: set = set()
-        self._batch_timer: Optional[asyncio.TimerHandle] = None
-        self._BAR_BATCH_DELAY_S: float = 3.0
+        self._batch_interval_ts: Optional[int] = None
 
     async def start(self, client: Optional[HyperliquidClient] = None):
         self._running = True
@@ -243,29 +242,22 @@ class DataStreamer:
 
     async def _on_symbol_bar_complete(self, symbol: str, candle: Candle):
         """Collect per-symbol bar completions into a batch."""
+        # New interval started — flush whatever we collected for the previous one
+        if self._batch_interval_ts is not None and candle.timestamp != self._batch_interval_ts:
+            await self._flush_bar_batch()
+
+        self._batch_interval_ts = candle.timestamp
         self._pending_bar_symbols.add(symbol)
-
-        if self._batch_timer is not None:
-            self._batch_timer.cancel()
-
-        loop = asyncio.get_event_loop()
 
         if self._pending_bar_symbols >= set(self.symbols):
             # All symbols reported — process immediately
-            self._batch_timer = None
             await self._flush_bar_batch()
-        else:
-            # Wait for stragglers
-            self._batch_timer = loop.call_later(
-                self._BAR_BATCH_DELAY_S,
-                lambda: loop.create_task(self._flush_bar_batch()),
-            )
 
     async def _flush_bar_batch(self):
         """Fire the bot callback once for the collected batch."""
         symbols = list(self._pending_bar_symbols)
         self._pending_bar_symbols.clear()
-        self._batch_timer = None
+        self._batch_interval_ts = None
 
         if not symbols:
             return
