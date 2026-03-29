@@ -34,16 +34,88 @@ MINUTES_PER_YEAR = 525_600
 INTERVAL_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
 VALID_INTERVALS = list(INTERVAL_MINUTES.keys())
 
-LOOKBACK_BARS_MAP = {"1m": 1500, "5m": 1500, "15m": 1000, "1h": 500}
+LOOKBACK_BARS_MAP = {"1m": 1500, "5m": 1500, "15m": 500, "1h": 500}
 FUNDING_BARS_MAP = {
-    "1m": 480,  # 8h * 60min
-    "5m": 96,  # 8h * 60 / 5
-    "15m": 32,  # 8h * 60 / 15
-    "1h": 8,  # 8h * 60 / 60
+    "1m": 480,
+    "5m": 96,
+    "15m": 32,
+    "1h": 8,
 }
 
 SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
+
+_HISTORY_COLUMNS = [
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "funding_rate",
+]
+
+
+class _ColumnView:
+    __slots__ = ("values",)
+
+    def __init__(self, arr: np.ndarray):
+        self.values = arr
+
+
+class _HistoryView:
+    __slots__ = ("_cols",)
+
+    def __init__(self, cols: dict):
+        self._cols = cols
+
+    def __getitem__(self, key: str) -> _ColumnView:
+        return _ColumnView(self._cols[key])
+
+    def __len__(self) -> int:
+        return len(next(iter(self._cols.values())))
+
+
+class _RingBuffer:
+    """Fixed-capacity ring buffer storing OHLCV history as numpy arrays."""
+
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self._arrays = {
+            col: np.empty(capacity, dtype=np.float64) for col in _HISTORY_COLUMNS
+        }
+        self._arrays["timestamp"] = np.empty(capacity, dtype=np.int64)
+        self._pos = 0
+        self._len = 0
+
+    def append(self, row: dict):
+        idx = self._pos % self.capacity
+        for col in _HISTORY_COLUMNS:
+            self._arrays[col][idx] = row[col]
+        self._pos += 1
+        self._len = min(self._len + 1, self.capacity)
+
+    def view(self) -> _HistoryView:
+        """Return an ordered snapshot as a _HistoryView (zero-copy when contiguous)."""
+        n = self._len
+        start = (self._pos - n) % self.capacity
+        if start + n <= self.capacity:
+            cols = {
+                col: self._arrays[col][start : start + n] for col in _HISTORY_COLUMNS
+            }
+        else:
+            tail = self.capacity - start
+            cols = {
+                col: np.concatenate(
+                    [self._arrays[col][start:], self._arrays[col][: n - tail]]
+                )
+                for col in _HISTORY_COLUMNS
+            }
+        return _HistoryView(cols)
+
+    @property
+    def length(self) -> int:
+        return self._len
 
 
 def default_data_dir(interval: str = "1m") -> str:
@@ -240,7 +312,7 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
     trade_log = []
     total_volume = 0.0
     prev_equity = INITIAL_CAPITAL
-    history_buffers = {symbol: [] for symbol in data}
+    ring_buffers = {symbol: _RingBuffer(lookback) for symbol in data}
 
     for ts in timestamps:
         portfolio.timestamp = ts
@@ -253,7 +325,7 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
             if isinstance(row, pd.DataFrame):
                 row = row.iloc[0]
 
-            bar_dict = {
+            bar_row = {
                 "timestamp": ts,
                 "open": row["open"],
                 "high": row["high"],
@@ -262,11 +334,8 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
                 "volume": row["volume"],
                 "funding_rate": row.get("funding_rate", 0.0),
             }
-            history_buffers[symbol].append(bar_dict)
-            if len(history_buffers[symbol]) > lookback:
-                history_buffers[symbol] = history_buffers[symbol][-lookback:]
-
-            hist_df = pd.DataFrame(history_buffers[symbol])
+            ring_buffers[symbol].append(bar_row)
+            hist_view = ring_buffers[symbol].view()
 
             bar_data[symbol] = BarData(
                 symbol=symbol,
@@ -277,7 +346,7 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
                 close=row["close"],
                 volume=row["volume"],
                 funding_rate=row.get("funding_rate", 0.0),
-                history=hist_df,
+                history=hist_view,
             )
 
         if not bar_data:
