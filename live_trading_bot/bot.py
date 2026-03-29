@@ -64,8 +64,9 @@ class TradingBot:
 
         self._current_positions: Dict[str, float] = {}
         self._current_prices: Dict[str, float] = {}
-        self._last_bar_times: Dict[str, int] = {}
         self._last_summary_time: Optional[datetime] = None
+        self._bar_count: int = 0
+        self._last_heartbeat: float = 0
 
     async def initialize(self):
         log_dir = Path(self.settings.LOG_PATH).parent
@@ -133,10 +134,11 @@ class TradingBot:
 
         account_state = await self.client.get_account_state()
 
-        for symbol, pos in account_state.positions.items():
-            self._current_positions[symbol] = (
-                pos.size if pos.side.value == "long" else -pos.size
-            )
+        if not self.settings.DRY_RUN:
+            for symbol, pos in account_state.positions.items():
+                self._current_positions[symbol] = (
+                    pos.size if pos.side.value == "long" else -pos.size
+                )
 
         self.metrics.update(
             equity=account_state.total_equity,
@@ -176,31 +178,31 @@ class TradingBot:
         return positions_usd
 
     async def _on_bar(self, symbol: str, candle: Candle):
+        """Called once per interval by DataStreamer after all symbols' bars are batched."""
         if not self._running:
             return
 
-        last_time = self._last_bar_times.get(symbol, 0)
-        if candle.timestamp <= last_time:
-            return
+        self._bar_count += 1
 
-        self._last_bar_times[symbol] = candle.timestamp
-
-        logger.info(
-            f"New bar completed",
-            extra={
-                "symbol": symbol,
-                "timestamp": candle.timestamp,
-                "close": candle.close,
-            },
-        )
+        import time as _time
+        now = _time.time()
+        if now - self._last_heartbeat >= 600:
+            self._last_heartbeat = now
+            logger.info(
+                "Heartbeat",
+                extra={
+                    "bars_total": self._bar_count,
+                    "positions": {s: round(v, 4) for s, v in self._current_positions.items()},
+                },
+            )
 
         try:
             assert self.client is not None
             assert self.alerter is not None
-            await self._process_bar()
+            await self._process_bar(triggered_by=symbol)
         except Exception as e:
             logger.error(
-                f"Error processing bar", extra={"symbol": symbol, "error": str(e)}
+                "Error processing bar", extra={"symbol": symbol, "error": str(e)}
             )
             if self.alerter is not None:
                 await self.alerter.alert_error(
@@ -295,7 +297,7 @@ class TradingBot:
         if self.settings.DRY_RUN:
             self._current_positions.pop(symbol, None)
 
-    async def _process_bar(self):
+    async def _process_bar(self, triggered_by: str = ""):
         assert self.client is not None
         assert self.data_streamer is not None
         assert self.strategy is not None
@@ -316,6 +318,8 @@ class TradingBot:
         histories = self.data_streamer.get_all_histories()
 
         if not self.settings.DRY_RUN:
+            for symbol in self.settings.TRADING_PAIRS:
+                self._current_positions.pop(symbol, None)
             for symbol, pos in account_state.positions.items():
                 self._current_positions[symbol] = (
                     pos.size if pos.side.value == "long" else -pos.size
@@ -337,8 +341,12 @@ class TradingBot:
             return
 
         logger.info(
-            f"Generated signals",
-            extra={"count": len(signals), "symbols": [s.symbol for s in signals]},
+            "Generated signals",
+            extra={
+                "triggered_by": triggered_by,
+                "count": len(signals),
+                "symbols": [s.symbol for s in signals],
+            },
         )
 
         for signal in signals:
@@ -362,7 +370,13 @@ class TradingBot:
         )
 
         if not risk_checked_signals:
-            logger.debug("All signals rejected by risk controller")
+            logger.info(
+                "All signals rejected by risk controller",
+                extra={
+                    "original_count": len(signals),
+                    "symbols": [s.symbol for s in signals],
+                },
+            )
             return
 
         limited_signals = self.position_limiter.apply_limits(
@@ -372,7 +386,13 @@ class TradingBot:
         )
 
         if not limited_signals:
-            logger.debug("All signals rejected by position limiter")
+            logger.info(
+                "All signals rejected by position limiter",
+                extra={
+                    "pre_limit_count": len(risk_checked_signals),
+                    "symbols": [s.symbol for s in risk_checked_signals],
+                },
+            )
             return
 
         if self.settings.TICK_EXECUTION_ENABLED and self.execution_engine:
@@ -497,6 +517,8 @@ class TradingBot:
         account_state = await self.client.get_account_state()
 
         if not self.settings.DRY_RUN:
+            for symbol in self.settings.TRADING_PAIRS:
+                self._current_positions.pop(symbol, None)
             for symbol, pos in account_state.positions.items():
                 self._current_positions[symbol] = (
                     pos.size if pos.side.value == "long" else -pos.size

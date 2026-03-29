@@ -26,8 +26,21 @@ cp .env.example .env
 
 | Variable | Description | Example |
 |---|---|---|
-| `HYPERLIQUID_PRIVATE_KEY` | Your Ethereum private key (with or without `0x` prefix) | `0xabc123...` |
+| `HYPERLIQUID_PRIVATE_KEY` | Your wallet private key (main wallet or API wallet) | `0xabc123...` |
 | `DRY_RUN` | `true` = simulated trading, `false` = real money | `true` |
+
+### API Wallet Setup
+
+If you trade through an API wallet (recommended for security), set both:
+
+| Variable | Description | Example |
+|---|---|---|
+| `HYPERLIQUID_PRIVATE_KEY` | Your **API wallet** private key | `0xabc123...` |
+| `HYPERLIQUID_MAIN_WALLET` | Your **main wallet** address (holds the funds) | `0xdef456...` |
+
+The API wallet signs orders; the main wallet holds equity and positions. You can create an API wallet from the Hyperliquid dashboard under Settings > API Wallets.
+
+If `HYPERLIQUID_MAIN_WALLET` is not set, the bot assumes `HYPERLIQUID_PRIVATE_KEY` is the main wallet's key (simpler setup, but the main key is stored in `.env`).
 
 ### Trading Variables
 
@@ -120,11 +133,11 @@ Live trading places real orders on Hyperliquid with real capital. Make sure you 
 ### Pre-Flight Checklist
 
 1. **Dry run passed** — Run dry run for at least 24-48 hours. Verify signals look correct and the bot handles reconnections gracefully.
-2. **Funded wallet** — Deposit USDC on Hyperliquid (Arbitrum). The bot uses your wallet balance as margin.
-3. **Private key has funds** — The private key in `.env` must control the wallet holding your trading capital.
+2. **Funded wallet** — Deposit USDC on Hyperliquid (Arbitrum) into your perps account. The bot uses your perps balance as margin.
+3. **Wallet configured** — Either your main wallet PK is in `.env`, or you've set up an API wallet with `HYPERLIQUID_MAIN_WALLET` pointing to your funded main wallet (see API Wallet Setup above).
 4. **Leverage is set correctly** — `MAX_LEVERAGE=20` for the 15m strategy (POS=2.00 means each position is 2x equity). Confirm this matches your risk tolerance.
 5. **Alerts configured** — Set up at least Telegram or Discord alerts so you get notified of trades and errors.
-6. `.env` is correct** — `DRY_RUN=false` (or unset, defaults to false), `BAR_INTERVAL=15m`.
+6. **`.env` is correct** — `DRY_RUN=false` (or unset, defaults to false), `BAR_INTERVAL=15m`.
 
 ### Start
 
@@ -206,6 +219,45 @@ See `results.md` for full tuning results and strategy comparison.
 
 ---
 
+## Testing & Validation
+
+### Golden-Master Snapshot Testing
+
+Run the strategy against historical data and save a snapshot. After code changes, re-run and compare to verify behavior is unchanged.
+
+```bash
+cd live_trading_bot
+
+# Generate a baseline snapshot
+uv run python backtest/backtest_interval.py \
+  --interval 15m --strategy strategies.strategy_15m \
+  --snapshot harness/baselines/baseline_15m.json
+
+# After changes, generate a new snapshot and compare
+uv run python backtest/backtest_interval.py \
+  --interval 15m --strategy strategies.strategy_15m \
+  --snapshot /tmp/after_change.json
+
+uv run python harness/compare.py harness/baselines/baseline_15m.json /tmp/after_change.json
+```
+
+Output is `PASS` (identical) or `FAIL` with the first divergent signal/trade.
+
+### Side-by-Side Live vs Dry-Run
+
+Run multiple bot instances in parallel on 1m intervals to compare live execution against dry-run simulation.
+
+```bash
+cd live_trading_bot
+
+# 2 dry-run + 1 live instance for 5 minutes
+uv run python harness/side_by_side.py --duration 5m --dry-runs 2 --live-runs 1
+```
+
+This launches separate bot processes, waits for the duration, then compares signal agreement across instances. Live requires `DRY_RUN=false` credentials configured.
+
+---
+
 ## Troubleshooting
 
 ### "HYPERLIQUID_PRIVATE_KEY not set"
@@ -215,7 +267,7 @@ Private key is required even in dry run (used for API authentication). Set it in
 Make sure you're running from inside `live_trading_bot/`, not the repo root. The bot uses relative imports within its directory.
 
 ### Bot starts but no signals appear
-The strategy needs warm-up time. The 15m strategy needs ~250 bars (~62 hours) of history before it starts generating signals. Wait for the history buffer to fill.
+The strategy needs warm-up bars loaded at startup. `LOOKBACK_BARS` is auto-derived from `BAR_INTERVAL` (1m=1000, 5m=1000, 15m=500). If you override `LOOKBACK_BARS`, it must be at least `LONG_WINDOW + 1` for the active strategy (1m needs 721+, 15m needs 145+).
 
 ### Reconnection issues
 The bot auto-reconnects on WebSocket disconnect with exponential backoff (1s → 60s max). If it can't reconnect after 60s, it logs an error and keeps trying.

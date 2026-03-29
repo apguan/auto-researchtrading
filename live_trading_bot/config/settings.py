@@ -49,6 +49,10 @@ class Settings:
 
     HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
     HYPERLIQUID_WS_URL: str = "wss://api.hyperliquid.xyz/ws"
+    # Main wallet address for account state queries. Set this when using an API
+    # wallet (which doesn't hold equity itself). If unset, defaults to the
+    # address derived from the private key (correct when the PK is the main wallet's).
+    HYPERLIQUID_MAIN_WALLET: str = ""
 
     DB_PATH: str = "trading_bot.db"
     SUPABASE_DB_URL: str = ""
@@ -58,6 +62,7 @@ class Settings:
     ALERT_ON_TRADE: bool = True
     ALERT_ON_ERROR: bool = True
     ALERT_ON_RISK_EVENT: bool = True
+    ALERT_INSTANCE_NAME: str = ""
 
     DRY_RUN: bool = False
     DRY_RUN_INITIAL_CAPITAL: float = 100_000.0
@@ -95,6 +100,9 @@ class Settings:
         if val := os.getenv("DAILY_LOSS_LIMIT_PCT"):
             settings.DAILY_LOSS_LIMIT_PCT = float(val)
 
+        if val := os.getenv("HYPERLIQUID_MAIN_WALLET"):
+            settings.HYPERLIQUID_MAIN_WALLET = val
+
         if val := os.getenv("DRY_RUN"):
             settings.DRY_RUN = val.lower() in ("true", "1", "yes")
 
@@ -120,6 +128,16 @@ class Settings:
                 settings.BAR_INTERVAL, "strategies.strategy_15m"
             )
 
+        if val := os.getenv("LOOKBACK_BARS"):
+            settings.LOOKBACK_BARS = int(val)
+        else:
+            # Must be >= strategy's max(LONG_WINDOW, ...) + 1 to generate signals.
+            # 1m LONG_WINDOW=720 needs 721+; 5m LONG_WINDOW=432 needs 433+.
+            _interval_lookback_map = {"1m": 1000, "5m": 1000, "15m": 500, "1h": 500}
+            settings.LOOKBACK_BARS = _interval_lookback_map.get(
+                settings.BAR_INTERVAL, 500
+            )
+
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
             settings.DRY_RUN_INITIAL_CAPITAL = float(val)
 
@@ -143,6 +161,21 @@ class Settings:
 
         if val := os.getenv("WATCHDOG_HEARTBEAT_PATH"):
             settings.WATCHDOG_HEARTBEAT_PATH = val
+
+        if val := os.getenv("ALERT_ON_TRADE"):
+            settings.ALERT_ON_TRADE = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ALERT_ON_ERROR"):
+            settings.ALERT_ON_ERROR = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ALERT_ON_RISK_EVENT"):
+            settings.ALERT_ON_RISK_EVENT = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("ALERT_INTERVAL_HOURS"):
+            settings.ALERT_INTERVAL_HOURS = float(val)
+
+        if val := os.getenv("ALERT_INSTANCE_NAME"):
+            settings.ALERT_INSTANCE_NAME = val
 
         return settings
 

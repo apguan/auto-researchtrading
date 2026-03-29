@@ -67,8 +67,16 @@ class Alerter:
             logger.error(f"Failed to send Discord alert", extra={"error": str(e)})
             return False
 
+    def _tag_message(self, message: str) -> str:
+        name = self.settings.ALERT_INSTANCE_NAME
+        if name:
+            tag = f"[{name}] "
+            return tag + message
+        return message
+
     async def send_alert(self, message: str, urgent: bool = False):
         tasks = []
+        message = self._tag_message(message)
 
         if urgent or self.settings.ALERT_ON_TRADE:
             if self.telegram_token:
@@ -90,13 +98,14 @@ class Alerter:
         if not self.settings.ALERT_ON_TRADE:
             return
 
+        notional = size * price
         pnl_str = f"\nP&L: ${pnl:.2f}" if pnl is not None else ""
 
         message = (
             f"🔔 <b>Trade Executed</b>\n\n"
             f"Symbol: {symbol}\n"
             f"Side: {side.upper()}\n"
-            f"Size: ${size:.2f}\n"
+            f"Size: {size:.6f} (${notional:.2f})\n"
             f"Price: ${price:.2f}"
             f"{pnl_str}\n\n"
             f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
@@ -122,7 +131,7 @@ class Alerter:
             f"✅ <b>Position Closed</b>\n\n"
             f"Symbol: {symbol}\n"
             f"Side: {side.upper()}\n"
-            f"Size: ${size:.2f}\n"
+            f"Size: {size:.6f} (${size * exit_price:.2f})\n"
             f"Entry: ${entry_price:.2f}\n"
             f"Exit: ${exit_price:.2f}\n"
             f"{pnl_emoji} P&L: ${pnl:.2f}\n\n"
