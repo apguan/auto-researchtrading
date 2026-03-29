@@ -62,6 +62,7 @@ class Settings:
     ALERT_ON_TRADE: bool = True
     ALERT_ON_ERROR: bool = True
     ALERT_ON_RISK_EVENT: bool = True
+    ALERT_INSTANCE_NAME: str = ""
 
     DRY_RUN: bool = False
     DRY_RUN_INITIAL_CAPITAL: float = 100_000.0
@@ -172,6 +173,9 @@ class Settings:
 
         if val := os.getenv("ALERT_INTERVAL_HOURS"):
             settings.ALERT_INTERVAL_HOURS = float(val)
+
+        if val := os.getenv("ALERT_INSTANCE_NAME"):
+            settings.ALERT_INSTANCE_NAME = val
 
         return settings
 

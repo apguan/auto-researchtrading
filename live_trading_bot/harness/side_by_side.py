@@ -294,8 +294,8 @@ def main():
         env["DB_PATH"] = db_path
         env["LOG_PATH"] = log_path
         env["BAR_INTERVAL"] = args.interval
-        env["ALERT_ON_TRADE"] = "false"
-        env["ALERT_INTERVAL_HOURS"] = "999"
+        env["ALERT_ON_TRADE"] = "true"
+        env["ALERT_INSTANCE_NAME"] = name
 
         print(f"  Starting {name} ({mode})...")
         proc = subprocess.Popen(

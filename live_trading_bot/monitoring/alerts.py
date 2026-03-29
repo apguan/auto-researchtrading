@@ -67,8 +67,16 @@ class Alerter:
             logger.error(f"Failed to send Discord alert", extra={"error": str(e)})
             return False
 
+    def _tag_message(self, message: str) -> str:
+        name = self.settings.ALERT_INSTANCE_NAME
+        if name:
+            tag = f"[{name}] "
+            return tag + message
+        return message
+
     async def send_alert(self, message: str, urgent: bool = False):
         tasks = []
+        message = self._tag_message(message)
 
         if urgent or self.settings.ALERT_ON_TRADE:
             if self.telegram_token:
