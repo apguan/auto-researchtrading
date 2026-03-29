@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS positions (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT UNIQUE NOT NULL,
+    size DOUBLE PRECISION NOT NULL,
+    entry_price DOUBLE PRECISION NOT NULL,
+    current_price DOUBLE PRECISION NOT NULL,
+    unrealized_pnl DOUBLE PRECISION NOT NULL,
+    side TEXT NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL
+);
+
+DO $$
+BEGIN
+    ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    CREATE POLICY "Allow all access" ON positions FOR ALL USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
