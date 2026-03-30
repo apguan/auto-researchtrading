@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
@@ -34,7 +34,7 @@ class RiskController:
     async def check_daily_loss_limit(
         self, account_state: AccountState
     ) -> RiskCheckResult:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if self.daily_start_equity is None or now.hour == 0 and now.minute == 0:
             self.daily_start_equity = account_state.total_equity
@@ -173,7 +173,7 @@ class RiskController:
             return []
 
         allowed_signals = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for signal in signals:
             symbol = signal.symbol
