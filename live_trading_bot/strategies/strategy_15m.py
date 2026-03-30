@@ -408,8 +408,8 @@ class Strategy:
 
 
 def _load_params_from_db():
-    """Load per-symbol strategy parameters from active_params table."""
     from dotenv import load_dotenv
+    import psycopg2
 
     INT_PARAMS = {
         "SHORT_WINDOW",
@@ -436,6 +436,45 @@ def _load_params_from_db():
         "BB_COMPRESS_PCTILE",
     }
 
+    PARAM_COLUMNS = [
+        "SHORT_WINDOW",
+        "MED_WINDOW",
+        "MED2_WINDOW",
+        "LONG_WINDOW",
+        "EMA_FAST",
+        "EMA_SLOW",
+        "RSI_PERIOD",
+        "RSI_BULL",
+        "RSI_BEAR",
+        "RSI_OVERBOUGHT",
+        "RSI_OVERSOLD",
+        "MACD_FAST",
+        "MACD_SLOW",
+        "MACD_SIGNAL",
+        "BB_PERIOD",
+        "FUNDING_LOOKBACK",
+        "FUNDING_BOOST",
+        "BASE_POSITION_PCT",
+        "VOL_LOOKBACK",
+        "TARGET_VOL",
+        "ATR_LOOKBACK",
+        "ATR_STOP_MULT",
+        "TAKE_PROFIT_PCT",
+        "BASE_THRESHOLD",
+        "BTC_OPPOSE_THRESHOLD",
+        "PYRAMID_THRESHOLD",
+        "PYRAMID_SIZE",
+        "CORR_LOOKBACK",
+        "HIGH_CORR_THRESHOLD",
+        "DD_REDUCE_THRESHOLD",
+        "DD_REDUCE_SCALE",
+        "COOLDOWN_BARS",
+        "MIN_VOTES",
+        "THRESHOLD_MIN",
+        "THRESHOLD_MAX",
+        "BB_COMPRESS_PCTILE",
+    ]
+
     try:
         env_path = Path(__file__).resolve().parent.parent / ".env"
         load_dotenv(env_path)
@@ -443,20 +482,34 @@ def _load_params_from_db():
         if not db_url:
             return
 
-        from storage.active_params import load_all_active_params
+        with psycopg2.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT symbol, "
+                    + ", ".join(PARAM_COLUMNS)
+                    + " FROM param_snapshots WHERE is_active = TRUE"
+                )
+                rows = cur.fetchall()
+                col_names = [desc[0] for desc in cur.description]
 
-        all_params = load_all_active_params(db_url)
-        if all_params:
-            global _SYMBOL_PARAMS
-            _SYMBOL_PARAMS = {}
-            for symbol, params in all_params.items():
-                symbol_params = {}
-                for key, value in params.items():
-                    if key in INT_PARAMS:
-                        value = int(value)
-                    symbol_params[key] = value
-                _SYMBOL_PARAMS[symbol] = symbol_params
-            print(f"Loaded per-symbol params for: {list(_SYMBOL_PARAMS.keys())}")
+        if not rows:
+            return
+
+        global _SYMBOL_PARAMS
+        _SYMBOL_PARAMS = {}
+        for row in rows:
+            raw = dict(zip(col_names, row))
+            symbol = raw.get("symbol", "ALL")
+            symbol_params = {}
+            for col in PARAM_COLUMNS:
+                val = raw[col]
+                if col in INT_PARAMS:
+                    val = int(val)
+                else:
+                    val = float(val)
+                symbol_params[col] = val
+            _SYMBOL_PARAMS[symbol] = symbol_params
+        print(f"Loaded active params for: {list(_SYMBOL_PARAMS.keys())}")
     except Exception as e:
         print(f"Warning: Could not load params from DB: {e}")
 
