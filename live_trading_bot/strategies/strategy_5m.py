@@ -1,10 +1,19 @@
+import sys
+from pathlib import Path
+
 import numpy as np
 from prepare import Signal, PortfolioState, BarData
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+from constants import INTERVAL_SYMBOLS, make_equal_weights
+
 # LOOKBACK_BARS: ~432 bars for warmup (LONG_WINDOW=432). At 5m that's 36h.
 
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
-SYMBOL_WEIGHTS = {"BTC": 0.25, "ETH": 0.25, "SOL": 0.25, "XRP": 0.25}
+ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["5m"]
+SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 72  # 6h
 MED_WINDOW = 144  # 12h

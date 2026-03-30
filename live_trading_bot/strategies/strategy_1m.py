@@ -1,8 +1,17 @@
+import sys
+from pathlib import Path
+
 import numpy as np
 from prepare import Signal, PortfolioState, BarData
 
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
-SYMBOL_WEIGHTS = {"BTC": 0.25, "ETH": 0.25, "SOL": 0.25, "XRP": 0.25}
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+from constants import INTERVAL_SYMBOLS, make_equal_weights
+
+ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1m"]
+SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 60  # 1h
 MED_WINDOW = 240  # 4h
