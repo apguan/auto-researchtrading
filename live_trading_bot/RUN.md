@@ -258,6 +258,23 @@ This launches separate bot processes, waits for the duration, then compares sign
 
 ---
 
+## PnL Checker
+
+Query realized + unrealized PnL directly from Hyperliquid. Captures all activity including manual trades and liquidations — not limited to what the bot recorded.
+
+```bash
+cd live_trading_bot
+
+python pnl.py              # Today (since midnight UTC)
+python pnl.py 1h           # Last hour
+python pnl.py 24h          # Last 24 hours
+python pnl.py 7d           # Last 7 days
+```
+
+Output includes per-symbol breakdown of realized PnL (closed trades), funding payments, and unrealized PnL on open positions.
+
+---
+
 ## Troubleshooting
 
 ### "HYPERLIQUID_PRIVATE_KEY not set"

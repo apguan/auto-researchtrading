@@ -259,6 +259,14 @@ class DryExchange:
     ) -> List[Order]:
         return []
 
+    # ── Fills & funding history ─────────────────────────────────────
+
+    async def get_user_fills(self, start_time: int, end_time: int) -> list[dict]:
+        return []
+
+    async def get_funding_history(self, start_time: int, end_time: int | None = None) -> list[dict]:
+        return []
+
     # ── Market data ────────────────────────────────────────────────
 
     async def get_funding_rate(self, symbol: str) -> float:
