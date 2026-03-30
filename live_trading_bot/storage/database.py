@@ -331,7 +331,7 @@ class Database:
 
     async def get_latest_params(self) -> Optional[ParamSnapshot]:
         row = await self.pool.fetchrow(
-            "SELECT * FROM param_snapshots WHERE is_best = TRUE ORDER BY run_date DESC LIMIT 1"
+            "SELECT * FROM param_snapshots WHERE is_active = TRUE ORDER BY run_date DESC LIMIT 1"
         )
         if row is None:
             return None

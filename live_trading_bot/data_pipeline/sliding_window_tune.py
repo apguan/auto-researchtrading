@@ -369,93 +369,63 @@ def save_to_database(all_window_results: list[dict]) -> None:
         cols = (
             "run_date, sweep_name, sharpe, total_return_pct, "
             "max_drawdown_pct, profit_factor, win_rate_pct, "
-            "num_trades, ret_dd_ratio, is_best, period, previous_snapshot_id, "
+            "num_trades, ret_dd_ratio, is_best, is_active, period, previous_snapshot_id, "
             + ", ".join(PARAM_COLUMNS)
         )
-        placeholders = ", ".join(["%s"] * (12 + len(PARAM_COLUMNS)))
+        placeholders = ", ".join(["%s"] * (13 + len(PARAM_COLUMNS)))
+
+        cur.execute(
+            "SELECT id FROM param_snapshots WHERE is_active = TRUE ORDER BY run_date DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        prev_snapshot_id = row[0] if row else None
+
+        cur.execute(
+            "UPDATE param_snapshots SET is_active = FALSE WHERE is_active = TRUE"
+        )
 
         for wr in all_window_results:
+            best = wr.get("best")
+            if best is None:
+                continue
+
             window_date = wr["window_date"]
             period = wr.get("period", "")
-            results = wr["results"]
-            best = wr.get("best")
+            sweep_name = best.get("sweep_name", "")
+            tagged_sweep = f"SW_{window_date}_{sweep_name}"
+
+            full_params = dict(DEFAULTS)
+            full_params.update(best.get("params", {}))
+            ret_dd = best.get("total_return_pct", 0) / max(
+                best.get("max_drawdown_pct", 0.01), 0.01
+            )
+
+            values = [
+                window_date,
+                tagged_sweep,
+                float(best.get("sharpe", 0)),
+                float(best.get("total_return_pct", 0)),
+                float(best.get("max_drawdown_pct", 0)),
+                float(best.get("profit_factor", 0)),
+                float(best.get("win_rate_pct", 0)),
+                int(best.get("num_trades", 0)),
+                float(ret_dd),
+                True,
+                True,
+                period,
+                prev_snapshot_id,
+            ]
+            for p in PARAM_COLUMNS:
+                values.append(float(full_params[p]))
 
             cur.execute(
-                "SELECT id FROM param_snapshots WHERE is_best = TRUE "
-                "ORDER BY run_date DESC LIMIT 1"
+                f"INSERT INTO param_snapshots ({cols}) VALUES ({placeholders})",
+                values,
             )
-            row = cur.fetchone()
-            prev_snapshot_id = row[0] if row else None
-
-            for r in results:
-                is_best = best is not None and r is best
-                full_params = dict(DEFAULTS)
-                full_params.update(r.get("params", {}))
-                sweep_name = r.get("sweep_name", "")
-                tagged_sweep = f"SW_{window_date}_{sweep_name}"
-                ret_dd = r.get("total_return_pct", 0) / max(
-                    r.get("max_drawdown_pct", 0.01), 0.01
-                )
-
-                values = [
-                    window_date,
-                    tagged_sweep,
-                    float(r.get("sharpe", 0)),
-                    float(r.get("total_return_pct", 0)),
-                    float(r.get("max_drawdown_pct", 0)),
-                    float(r.get("profit_factor", 0)),
-                    float(r.get("win_rate_pct", 0)),
-                    int(r.get("num_trades", 0)),
-                    float(ret_dd),
-                    is_best,
-                    period,
-                    prev_snapshot_id if is_best else None,
-                ]
-                for p in PARAM_COLUMNS:
-                    values.append(float(full_params[p]))
-
-                cur.execute(
-                    f"INSERT INTO param_snapshots ({cols}) VALUES ({placeholders})",
-                    values,
-                )
-                inserted += 1
-
-        # Save each window's best to active_params table
-        from storage.active_params import save_active_params as _save_active
-
-        for wr in all_window_results:
-            best_wr = wr.get("best")
-            if best_wr is None:
-                continue
-            wr_period = wr.get("period", "")
-            wr_window_date = wr["window_date"]
-            sweep_name = best_wr.get("sweep_name", "")
-            tagged_sweep = f"SW_{wr_window_date}_{sweep_name}"
-            full_params = dict(DEFAULTS)
-            full_params.update(best_wr.get("params", {}))
-            ret_dd = float(best_wr.get("total_return_pct", 0)) / max(
-                float(best_wr.get("max_drawdown_pct", 0.01)), 0.01
-            )
-            metrics = {
-                "sharpe": float(best_wr.get("sharpe", 0)),
-                "total_return_pct": float(best_wr.get("total_return_pct", 0)),
-                "max_drawdown_pct": float(best_wr.get("max_drawdown_pct", 0)),
-                "profit_factor": float(best_wr.get("profit_factor", 0)),
-                "win_rate_pct": float(best_wr.get("win_rate_pct", 0)),
-                "num_trades": int(best_wr.get("num_trades", 0)),
-                "ret_dd_ratio": ret_dd,
-            }
-            try:
-                _save_active(db_url, wr_period, tagged_sweep, metrics, full_params)
-            except Exception as exc:
-                logger.error(
-                    "Failed to save active params for window %s: %s",
-                    wr_window_date,
-                    exc,
-                )
+            inserted += 1
 
         conn.commit()
-        logger.info("Saved %d snapshots to database", inserted)
+        logger.info("Saved %d best snapshots to database (is_active=TRUE)", inserted)
     except Exception as exc:
         logger.error("Database insert failed: %s", exc)
         if conn:
