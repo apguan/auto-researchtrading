@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 from prepare import Signal, PortfolioState, BarData
 
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
-SYMBOL_WEIGHTS = {"BTC": 0.25, "ETH": 0.25, "SOL": 0.25, "XRP": 0.25}
+ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
+SYMBOL_WEIGHTS = {"BTC": 0.25, "ETH": 0.25, "SOL": 0.25, "XRP": 0.25, "HYPE": 0.25}
 
 SHORT_WINDOW = 24  # 6h
 MED_WINDOW = 48  # 12h

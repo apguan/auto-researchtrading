@@ -196,6 +196,8 @@ def save_snapshots_to_db(
     import psycopg2
     from backtest.tune_15m import DEFAULTS
 
+    log = logging.getLogger("daily_tune")
+
     db_url = os.environ.get("SUPABASE_DB_URL", "")
     if not db_url:
         return 0
@@ -229,9 +231,13 @@ def save_snapshots_to_db(
         inserted = 0
 
         for symbol, params in (parsed.get("per_symbol_params") or {}).items():
+            score = parsed.get("per_symbol_scores", {}).get(symbol, 0)
+            if score <= 0:
+                log.info("Skipping %s (score=%.2f, no improvement)", symbol, score)
+                continue
+
             full_params = dict(DEFAULTS)
             full_params.update(params)
-            score = parsed.get("per_symbol_scores", {}).get(symbol, 0)
 
             values = [
                 run_date,
