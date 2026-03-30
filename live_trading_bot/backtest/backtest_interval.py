@@ -42,7 +42,7 @@ FUNDING_BARS_MAP = {
     "1h": 8,
 }
 
-SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
+SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 
 _HISTORY_COLUMNS = [
@@ -380,12 +380,14 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
             signals = []
 
         for sig in signals or []:
-            signal_log.append((
-                ts,
-                sig.symbol,
-                sig.target_position,
-                portfolio.positions.get(sig.symbol, 0.0),
-            ))
+            signal_log.append(
+                (
+                    ts,
+                    sig.symbol,
+                    sig.target_position,
+                    portfolio.positions.get(sig.symbol, 0.0),
+                )
+            )
 
         for sig in signals or []:
             if sig.symbol not in bar_data:
