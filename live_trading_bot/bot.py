@@ -243,13 +243,14 @@ class TradingBot:
         pnl = None
         if self.execution_engine:
             entry = self.execution_engine._entry_prices.get(order.symbol, 0)
-            if entry > 0 and order.side.value in ("sell", "buy"):
-                direction = self.execution_engine._last_executed_direction.get(
-                    order.symbol, 0
-                )
-                # This is a close order if the position was open
-                if direction != 0:
-                    pnl = 0  # simplified; real PnL calculation would use entry vs exit price
+            direction = self.execution_engine._last_executed_direction.get(
+                order.symbol, 0
+            )
+            if entry > 0 and direction != 0:
+                if direction > 0 and order.side.value == "sell":  # closing long
+                    pnl = (order.avg_fill_price - entry) * order.filled_size
+                elif direction < 0 and order.side.value == "buy":  # closing short
+                    pnl = (entry - order.avg_fill_price) * order.filled_size
 
         await self.db.insert_trade(
             Trade(
@@ -446,10 +447,14 @@ class TradingBot:
                     pnl = None
                     current_pos = positions_usd.get(order.symbol, 0)
 
-                    if (current_pos > 0 and order.side.value == "sell") or (
-                        current_pos < 0 and order.side.value == "buy"
-                    ):
-                        pnl = 0
+                    if current_pos > 0 and order.side.value == "sell":
+                        entry = account_state.positions.get(order.symbol)
+                        entry_px = entry.entry_price if entry else order.avg_fill_price
+                        pnl = (order.avg_fill_price - entry_px) * order.filled_size
+                    elif current_pos < 0 and order.side.value == "buy":
+                        entry = account_state.positions.get(order.symbol)
+                        entry_px = entry.entry_price if entry else order.avg_fill_price
+                        pnl = (entry_px - order.avg_fill_price) * order.filled_size
 
                     await self.db.insert_trade(
                         Trade(
