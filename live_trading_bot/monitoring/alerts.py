@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 
@@ -108,7 +108,7 @@ class Alerter:
             f"Size: {size:.6f} (${notional:.2f})\n"
             f"Price: ${price:.2f}"
             f"{pnl_str}\n\n"
-            f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
 
         await self.send_alert(message, urgent=True)
@@ -135,7 +135,7 @@ class Alerter:
             f"Entry: ${entry_price:.2f}\n"
             f"Exit: ${exit_price:.2f}\n"
             f"{pnl_emoji} P&L: ${pnl:.2f}\n\n"
-            f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
 
         await self.send_alert(message, urgent=True)
@@ -153,7 +153,7 @@ class Alerter:
             f"Type: {event_type}\n"
             f"Details: {details}"
             f"{action_str}\n\n"
-            f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
 
         await self.send_alert(message, urgent=True)
@@ -168,7 +168,7 @@ class Alerter:
             f"🚨 <b>ERROR</b>\n\n"
             f"Error: {error_message}"
             f"{context_str}\n\n"
-            f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
 
         await self.send_alert(message, urgent=True)
@@ -176,7 +176,7 @@ class Alerter:
     async def send_hourly_summary(
         self, equity: float, positions: dict, daily_pnl: float, trade_count: int
     ):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if self._last_hourly_alert:
             hours_since = (now - self._last_hourly_alert).total_seconds() / 3600

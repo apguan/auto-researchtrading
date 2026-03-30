@@ -1,5 +1,5 @@
-from typing import Dict, Optional
-from exchange.types import Order, OrderSide, OrderStatus, Position
+from typing import Dict, Optional, Set
+from exchange.types import Order, OrderSide, OrderStatus, OrderType, Position
 from exchange.interface import Exchange
 from config.settings import Settings
 from monitoring.logger import get_logger
@@ -14,6 +14,45 @@ class StopManager:
         self.client = client
         self.settings = settings
         self._stops: Dict[str, Order] = {}  # symbol -> placed stop order
+
+    async def load_existing_stops(self, position_symbols: Set[str]) -> int:
+        """Hydrate _stops from exchange-side trigger orders surviving a restart."""
+        try:
+            open_orders = await self.client.get_open_orders()
+        except Exception as e:
+            logger.error("Failed to load existing stops", extra={"error": str(e)})
+            return 0
+
+        # Group trigger orders by symbol
+        triggers_by_symbol: Dict[str, list[Order]] = {}
+        for order in open_orders:
+            if order.order_type != OrderType.TRIGGER:
+                continue
+            if order.symbol not in position_symbols:
+                continue
+            triggers_by_symbol.setdefault(order.symbol, []).append(order)
+
+        loaded = 0
+        for symbol, orders in triggers_by_symbol.items():
+            # Keep the most recent, cancel duplicates
+            orders.sort(key=lambda o: o.timestamp or o.id, reverse=True)
+            self._stops[symbol] = orders[0]
+            loaded += 1
+            for dup in orders[1:]:
+                try:
+                    await self.client.cancel_order(symbol, dup.id)
+                    logger.info(
+                        "Cancelled duplicate stop",
+                        extra={"symbol": symbol, "order_id": dup.id},
+                    )
+                except Exception:
+                    pass
+
+        logger.info(
+            "Loaded existing stops",
+            extra={"loaded": loaded, "symbols": list(triggers_by_symbol.keys())},
+        )
+        return loaded
 
     async def place_stop(
         self, symbol: str, side: OrderSide, size: float, stop_price: float

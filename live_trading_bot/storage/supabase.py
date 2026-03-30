@@ -1,5 +1,5 @@
 import asyncpg
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict
 
 from .models import Trade, Position, SignalRecord, RiskEvent, ParamSnapshot
@@ -189,7 +189,7 @@ class SupabaseRepository:
     # --- Daily Stats ---
 
     async def get_daily_pnl(self, symbol: Optional[str] = None) -> float:
-        today_start = datetime.utcnow().replace(
+        today_start = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         if symbol:
@@ -206,7 +206,7 @@ class SupabaseRepository:
         return float(row["total"])
 
     async def get_trade_count_today(self) -> int:
-        today_start = datetime.utcnow().replace(
+        today_start = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         row = await self.pool.fetchrow(

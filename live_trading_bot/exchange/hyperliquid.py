@@ -433,7 +433,7 @@ class HyperliquidClient:
 
     async def get_open_orders(self, symbol: Optional[str] = None) -> List[Order]:
         result = await asyncio.to_thread(
-            self._info.open_orders, self.query_address
+            self._info.frontend_open_orders, self.query_address
         )
 
         orders: List[Order] = []
@@ -445,13 +445,17 @@ class HyperliquidClient:
                 continue
 
             ot_side = OrderSide.BUY if order_data.get("side") == "B" else OrderSide.SELL
-            raw_ot = order_data.get("orderType")
-            if isinstance(raw_ot, dict) and "trigger" in raw_ot:
+            is_trigger = order_data.get("isTrigger", False)
+            raw_ot = order_data.get("orderType", "")
+            if is_trigger or (isinstance(raw_ot, dict) and "trigger" in raw_ot):
                 ot_type = OrderType.TRIGGER
-            elif raw_ot == "limit":
+                price = float(order_data.get("triggerPx", 0) or order_data.get("limitPx", 0))
+            elif raw_ot == "Limit" or raw_ot == "limit":
                 ot_type = OrderType.LIMIT
+                price = float(order_data.get("limitPx", 0))
             else:
                 ot_type = OrderType.MARKET
+                price = float(order_data.get("limitPx", 0))
 
             orders.append(
                 Order(
@@ -460,7 +464,7 @@ class HyperliquidClient:
                     side=ot_side,
                     order_type=ot_type,
                     size=float(order_data.get("origSz", 0)),
-                    price=float(order_data.get("limitPx", 0)),
+                    price=price,
                     status=OrderStatus.PENDING,
                     filled_size=float(order_data.get("sz", 0)),
                     timestamp=datetime.fromtimestamp(
