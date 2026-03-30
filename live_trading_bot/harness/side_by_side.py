@@ -234,6 +234,7 @@ def main():
         env["ALERT_ON_TRADE"] = "true"
         env["ALERT_INSTANCE_NAME"] = name
 
+        mode = "DRY-RUN" if is_dry else "LIVE"
         print(f"  Starting {name} ({mode})...")
         proc = subprocess.Popen(
             [sys.executable, str(bot_script)],
