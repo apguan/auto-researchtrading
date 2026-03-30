@@ -105,7 +105,7 @@ INT_PARAMS = {
     "num_trades",
 }
 
-_ALL_COLUMNS = ["id", "period", "sweep_name"] + METRIC_COLUMNS + PARAM_COLUMNS
+_ALL_COLUMNS = ["id", "period", "symbol", "sweep_name"] + METRIC_COLUMNS + PARAM_COLUMNS
 
 
 def _coerce(col: str, val):
@@ -117,14 +117,15 @@ def _coerce(col: str, val):
 def save_active_params(
     db_url: str,
     period: str,
+    symbol: str,
     sweep_name: str,
     metrics: dict,
     params: dict,
 ) -> str:
     row_id = generate_uuid7()
 
-    cols = ["id", "period", "sweep_name"]
-    vals: list = [row_id, period, sweep_name]
+    cols = ["id", "period", "symbol", "sweep_name"]
+    vals: list = [row_id, period, symbol, sweep_name]
 
     for c in METRIC_COLUMNS:
         cols.append(c)
@@ -137,12 +138,12 @@ def save_active_params(
     placeholders = ", ".join(["%s"] * len(cols))
     col_list = ", ".join(cols)
     update_set = ", ".join(
-        f"{c} = EXCLUDED.{c}" for c in cols if c not in ("id", "period")
+        f"{c} = EXCLUDED.{c}" for c in cols if c not in ("id", "period", "symbol")
     )
 
     sql = (
         f"INSERT INTO active_params ({col_list}) VALUES ({placeholders}) "
-        f"ON CONFLICT (period) DO UPDATE SET {update_set}"
+        f"ON CONFLICT (period, symbol) DO UPDATE SET {update_set}"
     )
 
     try:
@@ -151,25 +152,28 @@ def save_active_params(
                 cur.execute(sql, vals)
             conn.commit()
     except Exception:
-        logger.exception("Failed to upsert active_params for period=%s", period)
+        logger.exception(
+            "Failed to upsert active_params for period=%s symbol=%s", period, symbol
+        )
         raise
 
     return row_id
 
 
-def load_active_params(db_url: str) -> dict | None:
+def load_active_params(db_url: str, symbol: str) -> dict | None:
     try:
         with psycopg2.connect(db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM active_params ORDER BY created_at DESC LIMIT 1"
+                    "SELECT * FROM active_params WHERE symbol = %s ORDER BY created_at DESC LIMIT 1",
+                    (symbol,),
                 )
                 row = cur.fetchone()
                 if row is None:
                     return None
                 col_names = [desc[0] for desc in cur.description]
     except Exception:
-        logger.exception("Failed to load active_params")
+        logger.exception("Failed to load active_params for symbol=%s", symbol)
         raise
 
     raw = {k.upper(): v for k, v in zip(col_names, row)}
@@ -181,5 +185,34 @@ def load_active_params(db_url: str) -> dict | None:
         result[c] = _coerce(c, raw[c.upper()])
     result["period"] = raw.get("PERIOD", raw.get("period", ""))
     result["sweep_name"] = raw.get("SWEEP_NAME", raw.get("sweep_name", ""))
+    result["symbol"] = raw.get("SYMBOL", raw.get("symbol", ""))
+
+    return result
+
+
+def load_all_active_params(db_url: str) -> dict[str, dict]:
+    try:
+        with psycopg2.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM active_params ORDER BY created_at DESC")
+                rows = cur.fetchall()
+                col_names = [desc[0] for desc in cur.description]
+    except Exception:
+        logger.exception("Failed to load all active_params")
+        raise
+
+    result: dict[str, dict] = {}
+    for row in rows:
+        raw = {k.upper(): v for k, v in zip(col_names, row)}
+        sym = raw.get("SYMBOL", raw.get("symbol", "ALL"))
+        entry: dict = {}
+        for c in PARAM_COLUMNS:
+            entry[c] = _coerce(c, raw[c.upper()])
+        for c in METRIC_COLUMNS:
+            entry[c] = _coerce(c, raw[c.upper()])
+        entry["period"] = raw.get("PERIOD", raw.get("period", ""))
+        entry["sweep_name"] = raw.get("SWEEP_NAME", raw.get("sweep_name", ""))
+        entry["symbol"] = sym
+        result[sym] = entry
 
     return result
