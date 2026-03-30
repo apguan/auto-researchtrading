@@ -261,6 +261,12 @@ See [`STRATEGIES.md`](STRATEGIES.md) for the complete evolution log with mathema
 
 ---
 
+## Live Trading Bot
+
+The `live_trading_bot/` directory contains a production trading bot that runs the discovered strategy against Hyperliquid perps in real-time. See [`live_trading_bot/RUN.md`](live_trading_bot/RUN.md) for full setup, configuration, deployment, and PnL monitoring docs.
+
+---
+
 ## Project Structure
 
 ```
@@ -274,6 +280,7 @@ See [`STRATEGIES.md`](STRATEGIES.md) for the complete evolution log with mathema
 │   ├── regime_mm.py
 │   ├── mean_reversion.py
 │   └── momentum_breakout.py
+├── live_trading_bot/    # Production trading bot (see live_trading_bot/RUN.md)
 ├── program.md           # Detailed instructions for the autonomous loop
 ├── STRATEGIES.md        # Complete evolution log of all 103 experiments
 ├── charts/              # Visualization PNGs of experiment progression
