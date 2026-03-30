@@ -18,3 +18,8 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "hyperliquid-python-sdk>=0.22.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
