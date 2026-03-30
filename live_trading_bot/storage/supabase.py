@@ -308,6 +308,7 @@ class SupabaseRepository:
             run_date=row["run_date"],
             sweep_name=row["sweep_name"],
             period=row["period"],
+            symbol=row.get("symbol", "ALL"),
             sharpe=float(row["sharpe"]),
             total_return_pct=float(row["total_return_pct"]),
             max_drawdown_pct=float(row["max_drawdown_pct"]),
@@ -329,7 +330,7 @@ class SupabaseRepository:
 
     async def get_latest_params(self) -> Optional[ParamSnapshot]:
         row = await self.pool.fetchrow(
-            "SELECT * FROM param_snapshots WHERE is_best = TRUE ORDER BY run_date DESC LIMIT 1"
+            "SELECT * FROM param_snapshots WHERE is_active = TRUE ORDER BY run_date DESC LIMIT 1"
         )
         if row is None:
             return None
