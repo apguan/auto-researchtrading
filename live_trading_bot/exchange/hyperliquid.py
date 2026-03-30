@@ -474,6 +474,20 @@ class HyperliquidClient:
             )
         return orders
 
+    # ── Fills & funding history ─────────────────────────────────────
+
+    async def get_user_fills(self, start_time: int, end_time: int) -> list[dict]:
+        """Get fills with closedPnl for a time window. Times in ms."""
+        return await asyncio.to_thread(
+            self._info.user_fills_by_time, self.query_address, start_time, end_time
+        )
+
+    async def get_funding_history(self, start_time: int, end_time: int | None = None) -> list[dict]:
+        """Get funding payments for a time window. start_time in ms."""
+        return await asyncio.to_thread(
+            self._info.user_funding_history, self.query_address, start_time, end_time
+        )
+
     # ── Market data ────────────────────────────────────────────────
 
     async def get_funding_rate(self, symbol: str) -> float:
