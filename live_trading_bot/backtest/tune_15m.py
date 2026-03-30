@@ -194,6 +194,8 @@ def save_results(
     walk_forward: dict | None,
     stability: dict | None,
     previous_file: str | None = None,
+    per_symbol_best_params: dict[str, dict] | None = None,
+    per_symbol_best_scores: dict[str, float] | None = None,
 ) -> str:
     """Save tuning results to JSON file. Returns the filename saved."""
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -219,6 +221,12 @@ def save_results(
         if stability
         else None,
     }
+
+    entry["format_version"] = 2
+    if per_symbol_best_params:
+        entry["per_symbol_best_params"] = _to_native(per_symbol_best_params)
+    if per_symbol_best_scores:
+        entry["per_symbol_best_scores"] = _to_native(per_symbol_best_scores)
 
     # Top 10 phase results (lightweight — just key metrics + params)
     top10 = sorted(all_phase_results, key=lambda x: x.get("_score", 0), reverse=True)[
@@ -257,14 +265,14 @@ def save_results(
         return ""
 
 
-def load_latest_results() -> tuple[dict | None, str | None]:
-    """Load the most recent tuning results file. Returns (best_params, filename) or (None, None)."""
+def load_latest_results() -> tuple[dict | None, str | None, dict[str, dict] | None]:
+    """Load the most recent tuning results file. Returns (best_params, filename, per_symbol_params)."""
     if not _RESULTS_DIR.exists():
-        return None, None
+        return None, None, None
 
     json_files = sorted(_RESULTS_DIR.glob("tune_15m_*.json"))
     if not json_files:
-        return None, None
+        return None, None, None
 
     latest = json_files[-1]
     print(f"  Loading previous results from: {latest.name}")
@@ -289,10 +297,11 @@ def load_latest_results() -> tuple[dict | None, str | None]:
             if changes:
                 print(f"  Previous param changes: {changes}")
 
-        return best_params, latest.name
+        per_symbol = data.get("per_symbol_best_params")
+        return best_params, latest.name, per_symbol
     except Exception as exc:
         print(f"  [WARN] Failed to load {latest.name}: {exc}")
-        return None, None
+        return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -391,21 +400,23 @@ SECONDARY_SWEEPS = [
 # ---------------------------------------------------------------------------
 # PARAMETER MANAGEMENT
 # ---------------------------------------------------------------------------
-def reset_params():
-    s15m._SYMBOL_PARAMS = {}  # prevent DB-loaded params from overriding tuning
+def reset_params(clear_symbol_params: bool = True):
+    if clear_symbol_params:
+        s15m._SYMBOL_PARAMS = {}
     for k, v in DEFAULTS.items():
         setattr(s15m, k, v)
 
 
-def set_params(overrides: dict, subsample_factor: int = 1):
-    s15m._SYMBOL_PARAMS = {}  # prevent DB-loaded params from overriding tuning
-    # Reset to (possibly scaled) defaults
+def set_params(
+    overrides: dict, subsample_factor: int = 1, clear_symbol_params: bool = True
+):
+    if clear_symbol_params:
+        s15m._SYMBOL_PARAMS = {}
     for k, v in DEFAULTS.items():
         if subsample_factor > 1 and k in BAR_COUNT_PARAMS:
             setattr(s15m, k, max(1, int(round(v / subsample_factor))))
         else:
             setattr(s15m, k, v)
-    # Apply (possibly scaled) overrides
     for k, v in overrides.items():
         if subsample_factor > 1 and k in BAR_COUNT_PARAMS:
             v = max(1, int(round(v / subsample_factor)))
@@ -414,8 +425,28 @@ def set_params(overrides: dict, subsample_factor: int = 1):
         setattr(s15m, k, v)
 
 
-def run_once(data, overrides: dict, subsample_factor: int = 1) -> dict:
-    set_params(overrides, subsample_factor=subsample_factor)
+def set_params_per_symbol(per_symbol_params: dict[str, dict]):
+    """Set per-symbol params for joint backtest (walk-forward, stability).
+
+    Sets _SYMBOL_PARAMS to the provided per-symbol dict, resets module-level
+    attrs to DEFAULTS as fallback values.
+    """
+    s15m._SYMBOL_PARAMS = {s: dict(p) for s, p in per_symbol_params.items()}
+    for k, v in DEFAULTS.items():
+        setattr(s15m, k, v)
+
+
+def run_once(
+    data,
+    overrides: dict,
+    subsample_factor: int = 1,
+    preserve_symbol_params: bool = False,
+) -> dict:
+    set_params(
+        overrides,
+        subsample_factor=subsample_factor,
+        clear_symbol_params=not preserve_symbol_params,
+    )
     strategy = s15m.Strategy()
     result = run_backtest_1m(strategy, data, "15m")
     if "error" in result:
@@ -425,16 +456,18 @@ def run_once(data, overrides: dict, subsample_factor: int = 1) -> dict:
     return result
 
 
-# Global for multiprocessing workers (set before Pool creation, inherited via fork)
-_mp_data = None
-_mp_subsample = 1
+def _sweep_worker(args: tuple) -> dict:
+    """Standalone worker: receives data explicitly, no globals.
 
-
-def _mp_run_once(overrides: dict) -> dict:
-    """Worker function for parallel sweeps. Uses forked copy of _mp_data."""
-    set_params(overrides, subsample_factor=_mp_subsample)
+    Args:
+        args: (data, overrides, subsample_factor) tuple
+    Returns:
+        Scored result dict with params and _score
+    """
+    data, overrides, subsample_factor = args
+    set_params(overrides, subsample_factor=subsample_factor)
     strategy = s15m.Strategy()
-    result = run_backtest_1m(strategy, _mp_data, "15m")
+    result = run_backtest_1m(strategy, data, "15m")
     if "error" in result:
         result["params"] = dict(overrides)
         result["_score"] = -1.0
@@ -461,47 +494,38 @@ def run_sweep(
     t0 = time.time()
 
     if n_workers > 1 and total > 1:
-        global _mp_data, _mp_subsample
-        _mp_data = data
-        _mp_subsample = subsample_factor
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        ctx = mp.get_context("spawn")
+        tasks = [(data, overrides, subsample_factor) for overrides in combos]
         timed_out = False
         try:
-            with mp.Pool(processes=n_workers) as pool:
-                async_result = pool.map_async(
-                    _mp_run_once, combos, chunksize=max(1, total // (n_workers * 4))
-                )
+            with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
+                futures = {
+                    executor.submit(_sweep_worker, t): i for i, t in enumerate(tasks)
+                }
                 timeout = max(300, total * 10)
-                while not async_result.ready():
-                    async_result.wait(timeout=5)
-                    if async_result.ready():
-                        break
-                    elapsed = time.time() - t0
-                    print(
-                        f"\r  Pool running... {elapsed:.0f}s/{timeout}s   ",
-                        end="",
-                        flush=True,
-                    )
-                    if elapsed > timeout:
-                        print(
-                            f"\n  [POOL TIMEOUT] after {timeout}s, "
-                            f"falling back to sequential"
-                        )
-                        pool.terminate()
-                        timed_out = True
-                        break
-                if timed_out:
-                    raw = []
-                    for overrides in combos:
+                raw = []
+                try:
+                    for future in as_completed(futures, timeout=timeout):
                         try:
-                            r = run_once(
-                                data, overrides, subsample_factor=subsample_factor
-                            )
-                            if "error" not in r:
-                                raw.append(r)
+                            raw.append(future.result(timeout=300))
                         except Exception:
                             pass
-                else:
-                    raw = async_result.get()
+                except TimeoutError:
+                    print(
+                        f"\n  [POOL TIMEOUT] after {timeout}s, falling back to sequential"
+                    )
+                    timed_out = True
+            if timed_out:
+                raw = []
+                for overrides in combos:
+                    try:
+                        r = run_once(data, overrides, subsample_factor=subsample_factor)
+                        if "error" not in r:
+                            raw.append(r)
+                    except Exception:
+                        pass
             results = [r for r in raw if r.get("_score", -1) >= 0]
             skipped = [r for r in raw if r.get("_score", -1) < 0]
             for r in skipped:
@@ -538,6 +562,141 @@ def run_sweep(
 
     elapsed = time.time() - t0
     print(f"\n  Completed in {elapsed:.1f}s ({elapsed / max(total, 1):.1f}s/combo)")
+    return results
+
+
+def _symbol_sweep_worker(args: tuple) -> list[dict]:
+    symbol, parquet_path, combos, subsample_factor = args
+    df = pd.read_parquet(parquet_path)
+    if subsample_factor > 1:
+        df = df.iloc[::subsample_factor].reset_index(drop=True)
+    symbol_data = {symbol: df}
+
+    results = []
+    for overrides in combos:
+        set_params(overrides, subsample_factor=1)
+        strategy = s15m.Strategy()
+        result = run_backtest_1m(strategy, symbol_data, "15m")
+        result["params"] = dict(overrides)
+        result["_symbol"] = symbol
+        if "error" in result:
+            result["_score"] = -1.0
+        else:
+            result["_score"] = score_result(result)
+            results.append(result)
+    return results
+
+
+def run_sweep_per_symbol(
+    all_data: dict,
+    name: str,
+    param_grid,
+    n_workers: int = 4,
+    subsample_factor: int = 1,
+    data_dir: str | None = None,
+) -> dict[str, list[dict]]:
+    """Run parameter sweep independently per symbol using parallel workers.
+
+    Each worker is assigned one symbol and runs ALL parameter combos
+    sequentially for that symbol. Workers run in parallel across symbols.
+    """
+    if isinstance(param_grid, list):
+        combos = [dict(p) for p in param_grid]
+    else:
+        keys = list(param_grid.keys())
+        values = list(param_grid.values())
+        combos = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
+
+    total_per_symbol = len(combos)
+    symbols = list(all_data.keys())
+    n_workers = min(n_workers, len(symbols))
+    print(
+        f"  Per-symbol sweep '{name}': {total_per_symbol} combos x {len(symbols)} symbols ({n_workers} workers)..."
+    )
+
+    if data_dir is None:
+        data_dir = str(_bot_root / "backtest_data" / "15m_candles")
+
+    t0 = time.time()
+    results: dict[str, list[dict]] = {}
+
+    if n_workers > 1:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        ctx = mp.get_context("spawn")
+
+        tasks = []
+        for symbol in symbols:
+            parquet_path = os.path.join(data_dir, f"{symbol}_15m.parquet")
+            tasks.append((symbol, parquet_path, combos, subsample_factor))
+
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
+                futures = {
+                    executor.submit(_symbol_sweep_worker, task): task[0]
+                    for task in tasks
+                }
+                for future in as_completed(
+                    futures, timeout=max(600, total_per_symbol * 15)
+                ):
+                    sym = futures[future]
+                    try:
+                        symbol_results = future.result(timeout=300)
+                        results[sym] = [
+                            r for r in symbol_results if r.get("_score", -1) >= 0
+                        ]
+                        print(
+                            f"    {sym}: {len(results[sym])}/{total_per_symbol} valid results"
+                        )
+                    except Exception as e:
+                        print(f"    {sym}: ERROR - {e}")
+                        results[sym] = []
+        except Exception as e:
+            print(f"  [POOL ERROR] {e}, falling back to sequential")
+            for symbol in symbols:
+                symbol_data = {symbol: all_data[symbol]}
+                symbol_results = []
+                for overrides in combos:
+                    try:
+                        r = run_once(
+                            symbol_data, overrides, subsample_factor=subsample_factor
+                        )
+                        if "error" not in r:
+                            r["_symbol"] = symbol
+                            symbol_results.append(r)
+                    except Exception:
+                        pass
+                results[symbol] = symbol_results
+    else:
+        for symbol in symbols:
+            symbol_data = {symbol: all_data[symbol]}
+            symbol_results = []
+            for i, overrides in enumerate(combos):
+                try:
+                    r = run_once(
+                        symbol_data, overrides, subsample_factor=subsample_factor
+                    )
+                    if "error" not in r:
+                        r["_symbol"] = symbol
+                        symbol_results.append(r)
+                except Exception as e:
+                    print(f"  [ERROR] {overrides}: {e}")
+                elapsed = time.time() - t0
+                eta = elapsed / (i + 1) * (total_per_symbol - i - 1) if i > 0 else 0
+                print(
+                    f"\r  [{symbol}] {(i + 1) / total_per_symbol * 100:5.1f}% "
+                    f"({i + 1}/{total_per_symbol})  ETA: {eta:.0f}s   ",
+                    end="",
+                    flush=True,
+                )
+            results[symbol] = symbol_results
+            print()
+
+    elapsed = time.time() - t0
+    total_valid = sum(len(v) for v in results.values())
+    print(
+        f"  Completed per-symbol sweep in {elapsed:.1f}s ({total_valid} valid results across {len(symbols)} symbols)"
+    )
     return results
 
 
@@ -671,9 +830,41 @@ def forward_stepwise_accumulate(
     return current_params, current_score
 
 
-# ---------------------------------------------------------------------------
-# ADAPTIVE MULTI-GRID
-# ---------------------------------------------------------------------------
+def revalidate_per_symbol(
+    full_data: dict,
+    per_symbol_results: dict[str, list[dict]],
+    top_n: int = 2,
+) -> dict[str, list[dict]]:
+    validated: dict[str, list[dict]] = {}
+    for symbol, results in per_symbol_results.items():
+        if results:
+            symbol_data = {symbol: full_data[symbol]}
+            validated[symbol] = revalidate(symbol_data, results, top_n=top_n)
+        else:
+            validated[symbol] = []
+    return validated
+
+
+def forward_stepwise_per_symbol(
+    full_data: dict,
+    per_symbol_results: dict[str, list[dict]],
+    initial_params: dict | None = None,
+) -> dict[str, tuple[dict, float]]:
+    """Run forward stepwise accumulation independently for each symbol."""
+    per_symbol_best: dict[str, tuple[dict, float]] = {}
+    for symbol, phase_results in per_symbol_results.items():
+        if not phase_results:
+            per_symbol_best[symbol] = (initial_params or DEFAULTS.copy(), 0.0)
+            continue
+        symbol_data = {symbol: full_data[symbol]}
+        params, score = forward_stepwise_accumulate(
+            symbol_data, phase_results, initial_params=initial_params
+        )
+        per_symbol_best[symbol] = (params, score)
+        print(f"  {symbol} stepwise score: {score:.2f}")
+    return per_symbol_best
+
+
 # Params to include in adaptive grid, with value generators
 ADAPTIVE_GRID_PARAMS = {
     "RSI_PERIOD": lambda v: sorted(
@@ -749,10 +940,21 @@ def build_adaptive_grid(best_params: dict) -> dict:
     return grid
 
 
+def build_adaptive_grid_per_symbol(
+    per_symbol_best: dict[str, tuple[dict, float]],
+) -> dict[str, dict]:
+    per_symbol_grid: dict[str, dict] = {}
+    for symbol, (best_params, score) in per_symbol_best.items():
+        per_symbol_grid[symbol] = build_adaptive_grid(best_params)
+    return per_symbol_grid
+
+
 # ---------------------------------------------------------------------------
 # WALK-FORWARD VALIDATION
 # ---------------------------------------------------------------------------
-def run_walk_forward(data, overrides: dict, n_folds: int = 5) -> dict:
+def run_walk_forward(
+    data, overrides: dict, n_folds: int = 5, preserve_symbol_params: bool = False
+) -> dict:
     all_ts = set()
     for df in data.values():
         all_ts.update(df["timestamp"].tolist())
@@ -780,9 +982,9 @@ def run_walk_forward(data, overrides: dict, n_folds: int = 5) -> dict:
         train_bars = sum(len(df) for df in train_data.values())
         test_bars = sum(len(df) for df in test_data.values())
 
-        set_params(overrides)
+        set_params(overrides, clear_symbol_params=not preserve_symbol_params)
         train_result = run_backtest_1m(s15m.Strategy(), train_data, "15m")
-        set_params(overrides)
+        set_params(overrides, clear_symbol_params=not preserve_symbol_params)
         test_result = run_backtest_1m(s15m.Strategy(), test_data, "15m")
 
         train_result["final_equity"] = train_result.get("final_equity", 10000.0)
@@ -847,7 +1049,12 @@ def run_walk_forward(data, overrides: dict, n_folds: int = 5) -> dict:
 # ---------------------------------------------------------------------------
 # PARAMETER STABILITY TEST
 # ---------------------------------------------------------------------------
-def test_stability(data, overrides: dict, perturbation: float = 0.1) -> dict:
+def test_stability(
+    data,
+    overrides: dict,
+    perturbation: float = 0.1,
+    preserve_symbol_params: bool = False,
+) -> dict:
     baseline = run_once(data, overrides)
     if "error" in baseline:
         return {"stable": False, "reason": "baseline error", "details": []}
@@ -874,7 +1081,9 @@ def test_stability(data, overrides: dict, perturbation: float = 0.1) -> dict:
 
             test_overrides = dict(overrides)
             test_overrides[k] = perturbed_val
-            test_result = run_once(data, test_overrides)
+            test_result = run_once(
+                data, test_overrides, preserve_symbol_params=preserve_symbol_params
+            )
             if "error" in test_result:
                 continue
             test_score = test_result["_score"]
@@ -1020,10 +1229,15 @@ def main():
     best_params_accumulator = DEFAULTS.copy()
     best_overall_result = None
     all_phase_results = []
+    per_symbol_best_accumulator: dict[str, tuple[dict, float]] | None = None
 
     previous_file = None
     if args.load_previous:
-        prev_params, previous_file = load_latest_results()
+        prev_params, previous_file, prev_per_symbol = load_latest_results()
+        if prev_per_symbol:
+            per_symbol_best_accumulator = {
+                s: (p, 0.0) for s, p in prev_per_symbol.items()
+            }
         if prev_params:
             best_params_accumulator = prev_params.copy()
             for k, v in DEFAULTS.items():
@@ -1033,78 +1247,102 @@ def main():
         else:
             print("  No previous results found, starting from defaults")
 
-    # ---- PHASE 1: SINGLE-PARAMETER SWEEPS (screen on subsampled) ----
+    # ---- PHASE 1: SINGLE-PARAMETER SWEEPS (screen on subsampled, per-symbol) ----
+    per_symbol_phase_results: dict[str, list[dict]] = {}
     if args.phase in ("single", "all"):
         print("\n" + "=" * 90)
-        print("PHASE 1: SINGLE-PARAMETER SWEEPS (subsampled)")
+        print("PHASE 1: SINGLE-PARAMETER SWEEPS (per-symbol, subsampled)")
         print("=" * 90)
         for name, grid in SINGLE_SWEEPS:
-            results = run_sweep(
+            per_symbol_results = run_sweep_per_symbol(
                 screen_data,
                 name,
                 grid,
                 n_workers=args.workers,
                 subsample_factor=args.subsample,
             )
-            best_screen = print_results(results, name)
-            if results and args.subsample > 1:
-                validated = revalidate(full_data, results, top_n=args.revalidate_top)
-                if validated:
-                    print_results(
-                        validated, f"{name} (full data)", top_n=len(validated)
-                    )
-                    all_phase_results.extend(validated)
-                    for r in validated:
-                        if (
-                            best_overall_result is None
-                            or r["_score"] > best_overall_result["_score"]
-                        ):
-                            best_overall_result = r
-            elif best_screen:
-                all_phase_results.append(best_screen)
-                if (
-                    best_overall_result is None
-                    or best_screen["_score"] > best_overall_result["_score"]
-                ):
-                    best_overall_result = best_screen
+            if args.subsample > 1:
+                per_symbol_results = revalidate_per_symbol(
+                    full_data, per_symbol_results, top_n=args.revalidate_top
+                )
+            for symbol, results in per_symbol_results.items():
+                if symbol not in per_symbol_phase_results:
+                    per_symbol_phase_results[symbol] = []
+                per_symbol_phase_results[symbol].extend(results)
+                if results:
+                    best_screen = print_results(results, f"{name} [{symbol}]")
+                    all_phase_results.extend(results)
+                    best_r = results[0]
+                    if (
+                        best_overall_result is None
+                        or best_r["_score"] > best_overall_result["_score"]
+                    ):
+                        best_overall_result = best_r
 
-    # ---- PHASE 2: SECONDARY SWEEPS (screen on subsampled) ----
+    # ---- PHASE 2: SECONDARY SWEEPS (screen on subsampled, per-symbol) ----
     if args.phase in ("secondary", "all"):
         print("\n" + "=" * 90)
-        print("PHASE 2: SECONDARY SWEEPS (subsampled)")
+        print("PHASE 2: SECONDARY SWEEPS (per-symbol, subsampled)")
         print("=" * 90)
         for name, grid in SECONDARY_SWEEPS:
-            results = run_sweep(
+            per_symbol_results = run_sweep_per_symbol(
                 screen_data,
                 name,
                 grid,
                 n_workers=args.workers,
                 subsample_factor=args.subsample,
             )
-            best_screen = print_results(results, name)
-            if results and args.subsample > 1:
-                validated = revalidate(full_data, results, top_n=args.revalidate_top)
-                if validated:
-                    print_results(
-                        validated, f"{name} (full data)", top_n=len(validated)
-                    )
-                    all_phase_results.extend(validated)
-                    for r in validated:
-                        if (
-                            best_overall_result is None
-                            or r["_score"] > best_overall_result["_score"]
-                        ):
-                            best_overall_result = r
-            elif best_screen:
-                all_phase_results.append(best_screen)
-                if (
-                    best_overall_result is None
-                    or best_screen["_score"] > best_overall_result["_score"]
-                ):
-                    best_overall_result = best_screen
+            if args.subsample > 1:
+                per_symbol_results = revalidate_per_symbol(
+                    full_data, per_symbol_results, top_n=args.revalidate_top
+                )
+            for symbol, results in per_symbol_results.items():
+                if symbol not in per_symbol_phase_results:
+                    per_symbol_phase_results[symbol] = []
+                per_symbol_phase_results[symbol].extend(results)
+                if results:
+                    best_screen = print_results(results, f"{name} [{symbol}]")
+                    all_phase_results.extend(results)
+                    best_r = results[0]
+                    if (
+                        best_overall_result is None
+                        or best_r["_score"] > best_overall_result["_score"]
+                    ):
+                        best_overall_result = best_r
 
-    # ---- FORWARD STEPWISE ACCUMULATOR ----
-    if best_overall_result is not None and args.phase in ("secondary", "multi", "all"):
+    # ---- FORWARD STEPWISE ACCUMULATOR (per-symbol) ----
+    stepwise_score = 0.0
+    if per_symbol_phase_results and args.phase in ("secondary", "multi", "all"):
+        print("\n" + "=" * 90)
+        print("FORWARD STEPWISE ACCUMULATOR (per-symbol)")
+        print("=" * 90)
+        per_symbol_best_accumulator = forward_stepwise_per_symbol(
+            full_data, per_symbol_phase_results, initial_params=best_params_accumulator
+        )
+        for symbol, (params, score) in per_symbol_best_accumulator.items():
+            changes = {k: v for k, v in params.items() if v != DEFAULTS.get(k)}
+            print(f"  {symbol} stepwise changes: {changes}, score: {score:.2f}")
+        per_symbol_params = {
+            s: params for s, (params, score) in per_symbol_best_accumulator.items()
+        }
+        set_params_per_symbol(per_symbol_params)
+        joint_result = run_once(full_data, DEFAULTS.copy(), preserve_symbol_params=True)
+        if "error" not in joint_result:
+            stepwise_score = joint_result["_score"]
+            print(
+                f"  Joint portfolio score with per-symbol params: {stepwise_score:.2f}"
+            )
+            if (
+                best_overall_result is None
+                or stepwise_score > best_overall_result["_score"]
+            ):
+                joint_result["params"] = best_params_accumulator.copy()
+                best_overall_result = joint_result
+    elif best_overall_result is not None and args.phase in (
+        "secondary",
+        "multi",
+        "all",
+    ):
         print("\n" + "=" * 90)
         print("FORWARD STEPWISE ACCUMULATOR")
         print("=" * 90)
@@ -1125,46 +1363,101 @@ def main():
             print(f"  -> Stepwise OK, keeping combined params")
             best_params_accumulator = stepwise_params.copy()
 
-    # ---- PHASE 3: ADAPTIVE MULTI-PARAMETER GRID ----
+    # ---- PHASE 3: ADAPTIVE MULTI-PARAMETER GRID (per-symbol) ----
     if args.phase in ("multi", "all"):
-        if args.multi_grid:
-            grid = json.loads(args.multi_grid)
-        else:
-            grid = build_adaptive_grid(best_params_accumulator)
+        if per_symbol_best_accumulator:
+            per_symbol_grid = build_adaptive_grid_per_symbol(
+                per_symbol_best_accumulator
+            )
+            print("\n" + "=" * 90)
+            print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID (per-symbol)")
+            print("=" * 90)
+            for symbol, grid in per_symbol_grid.items():
+                total_combos = 1
+                for v in grid.values():
+                    total_combos *= len(v)
+                print(f"  {symbol} adaptive grid: {total_combos} combinations")
 
-        total_combos = 1
-        for v in grid.values():
-            total_combos *= len(v)
-
-        print("\n" + "=" * 90)
-        print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID")
-        print("=" * 90)
-        print(f"  Grid derived from phase 1-2 winners:")
-        for k, v in grid.items():
-            print(f"    {k}: {v}")
-        print(f"  Total combinations: {total_combos}")
-
-        # Screen entire grid on subsampled data
-        results = run_sweep(
-            screen_data,
-            "ADAPTIVE_MULTI (subsampled)",
-            grid,
-            n_workers=args.workers,
-            subsample_factor=args.subsample,
-        )
-        if results and args.subsample > 1:
-            top_n = min(10, len(results))
-            validated = revalidate(full_data, results, top_n=top_n)
-            if validated:
-                print_results(
-                    validated, "ADAPTIVE_MULTI (full data)", top_n=len(validated)
+                symbol_screen = {symbol: screen_data[symbol]}
+                results = run_sweep(
+                    symbol_screen,
+                    f"ADAPTIVE [{symbol}]",
+                    grid,
+                    n_workers=min(args.workers, total_combos),
+                    subsample_factor=args.subsample,
                 )
-                best_params_accumulator.update(validated[0]["params"])
-                all_phase_results.extend(validated)
+                best_screen = print_results(results, f"ADAPTIVE [{symbol}]")
+                if results and args.subsample > 1:
+                    symbol_full = {symbol: full_data[symbol]}
+                    validated = revalidate(
+                        symbol_full, results, top_n=min(10, len(results))
+                    )
+                    if validated:
+                        print_results(
+                            validated,
+                            f"ADAPTIVE [{symbol}] (full)",
+                            top_n=len(validated),
+                        )
+                        current_params, _ = per_symbol_best_accumulator.get(
+                            symbol, (DEFAULTS.copy(), 0.0)
+                        )
+                        current_params = current_params.copy()
+                        current_params.update(validated[0]["params"])
+                        per_symbol_best_accumulator[symbol] = (
+                            current_params,
+                            validated[0]["_score"],
+                        )
+                        all_phase_results.extend(validated)
+                        if (
+                            best_overall_result is None
+                            or validated[0]["_score"] > best_overall_result["_score"]
+                        ):
+                            best_overall_result = validated[0]
+                elif best_screen:
+                    all_phase_results.append(best_screen)
+                    if (
+                        best_overall_result is None
+                        or best_screen["_score"] > best_overall_result["_score"]
+                    ):
+                        best_overall_result = best_screen
         else:
-            best = print_results(results, "ADAPTIVE_MULTI")
-            if best:
-                best_params_accumulator.update(best["params"])
+            if args.multi_grid:
+                grid = json.loads(args.multi_grid)
+            else:
+                grid = build_adaptive_grid(best_params_accumulator)
+
+            total_combos = 1
+            for v in grid.values():
+                total_combos *= len(v)
+
+            print("\n" + "=" * 90)
+            print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID")
+            print("=" * 90)
+            print(f"  Grid derived from phase 1-2 winners:")
+            for k, v in grid.items():
+                print(f"    {k}: {v}")
+            print(f"  Total combinations: {total_combos}")
+
+            results = run_sweep(
+                screen_data,
+                "ADAPTIVE_MULTI (subsampled)",
+                grid,
+                n_workers=args.workers,
+                subsample_factor=args.subsample,
+            )
+            if results and args.subsample > 1:
+                top_n = min(10, len(results))
+                validated = revalidate(full_data, results, top_n=top_n)
+                if validated:
+                    print_results(
+                        validated, "ADAPTIVE_MULTI (full data)", top_n=len(validated)
+                    )
+                    best_params_accumulator.update(validated[0]["params"])
+                    all_phase_results.extend(validated)
+            else:
+                best = print_results(results, "ADAPTIVE_MULTI")
+                if best:
+                    best_params_accumulator.update(best["params"])
 
     # ---- PHASE 4: WALK-FORWARD VALIDATION ----
     wf_result = None
@@ -1188,11 +1481,24 @@ def main():
         print("\n" + "=" * 90)
         print("PHASE 4: WALK-FORWARD VALIDATION (best candidate)")
         print("=" * 90)
-        print("  Params changed from defaults:")
-        for k, v in sorted(best_params_accumulator.items()):
-            if v != DEFAULTS.get(k):
-                print(f"    {k}: {DEFAULTS.get(k)} -> {v}")
-        wf = run_walk_forward(full_data, best_params_accumulator)
+        if per_symbol_best_accumulator:
+            per_symbol_params = {
+                s: params for s, (params, score) in per_symbol_best_accumulator.items()
+            }
+            set_params_per_symbol(per_symbol_params)
+            print("  Using per-symbol params for joint walk-forward:")
+            for symbol, params in per_symbol_params.items():
+                changes = {k: v for k, v in params.items() if v != DEFAULTS.get(k)}
+                print(f"    {symbol}: {changes}")
+            wf = run_walk_forward(
+                full_data, best_params_accumulator, preserve_symbol_params=True
+            )
+        else:
+            print("  Params changed from defaults:")
+            for k, v in sorted(best_params_accumulator.items()):
+                if v != DEFAULTS.get(k):
+                    print(f"    {k}: {DEFAULTS.get(k)} -> {v}")
+            wf = run_walk_forward(full_data, best_params_accumulator)
         if "error" not in wf:
             print_walk_forward(wf)
             wf_result = wf
@@ -1200,7 +1506,16 @@ def main():
         print("\n" + "=" * 90)
         print("PHASE 5: PARAMETER STABILITY TEST")
         print("=" * 90)
-        stab = test_stability(full_data, best_params_accumulator)
+        if per_symbol_best_accumulator:
+            ps_for_stab = {
+                s: params for s, (params, score) in per_symbol_best_accumulator.items()
+            }
+            set_params_per_symbol(ps_for_stab)
+            stab = test_stability(
+                full_data, best_params_accumulator, preserve_symbol_params=True
+            )
+        else:
+            stab = test_stability(full_data, best_params_accumulator)
         print_stability(stab)
         stab_result = stab
 
@@ -1244,6 +1559,16 @@ def main():
         else:
             save_params = best_params_accumulator
 
+        per_symbol_save_params = None
+        per_symbol_save_scores = None
+        if per_symbol_best_accumulator:
+            per_symbol_save_params = {
+                s: params for s, (params, score) in per_symbol_best_accumulator.items()
+            }
+            per_symbol_save_scores = {
+                s: score for s, (params, score) in per_symbol_best_accumulator.items()
+            }
+
         save_results(
             save_params,
             best_overall_result.get("_score", 0),
@@ -1251,6 +1576,8 @@ def main():
             wf_result,
             stab_result,
             previous_file=previous_file,
+            per_symbol_best_params=per_symbol_save_params,
+            per_symbol_best_scores=per_symbol_save_scores,
         )
 
     reset_params()
