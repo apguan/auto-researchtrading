@@ -26,11 +26,14 @@ from datetime import datetime, timezone
 
 PIPELINE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PIPELINE_ROOT.parent
+LIVE_BOT_ROOT = REPO_ROOT / "live_trading_bot"
 
-for _p in (PIPELINE_ROOT, REPO_ROOT):
+for _p in (PIPELINE_ROOT, LIVE_BOT_ROOT):
     _sp = str(_p)
     if _sp not in sys.path:
         sys.path.insert(0, _sp)
+
+sys.path = [p for p in sys.path if Path(p).resolve() != REPO_ROOT]
 
 LOG_DIR = PIPELINE_ROOT / "logs"
 

@@ -21,6 +21,8 @@ for _p in (_pipeline_root, _repo_root):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
+sys.path = [p for p in sys.path if Path(p).resolve() != _repo_root]
+sys.path.append(str(_repo_root))
 import requests
 
 from prepare import BarData, Signal, PortfolioState
