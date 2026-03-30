@@ -17,4 +17,4 @@ COPY . .
 WORKDIR /app/live_trading_bot
 
 ENV PYTHONUNBUFFERED=1
-CMD ["uv", "run", "python", "-u", "harness/side_by_side.py", "--duration", "8h", "--dry-runs", "2", "--live-runs", "1"]
+CMD ["uv", "run", "python", "-u", "harness/side_by_side.py", "--dry-runs", "2", "--live-runs", "1"]

@@ -11,10 +11,11 @@ Main entry point that orchestrates:
 - Monitoring and alerts
 """
 
+import argparse
 import asyncio
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -135,6 +136,11 @@ class TradingBot:
                     pos.size if pos.side.value == "long" else -pos.size
                 )
 
+        if self.stop_manager and not self.settings.DRY_RUN:
+            await self.stop_manager.load_existing_stops(
+                set(self._current_positions.keys())
+            )
+
         self.metrics.update(
             equity=account_state.total_equity,
             cash=account_state.available_balance,
@@ -248,7 +254,7 @@ class TradingBot:
         await self.db.insert_trade(
             Trade(
                 id=None,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 symbol=order.symbol,
                 side=order.side.value,
                 size=order.filled_size,
@@ -332,7 +338,7 @@ class TradingBot:
             await self.db.insert_signal(
                 SignalRecord(
                     id=None,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     symbol=signal.symbol,
                     signal_type="target_position",
                     target_position=signal.target_position,
@@ -380,7 +386,7 @@ class TradingBot:
                 await self.db.insert_signal(
                     SignalRecord(
                         id=None,
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(timezone.utc),
                         symbol=signal.symbol,
                         signal_type="target_position",
                         target_position=signal.target_position,
@@ -394,7 +400,7 @@ class TradingBot:
                     target_position=signal.target_position,
                     atr=self._get_current_atr(signal.symbol),
                     entry_price=self._current_prices.get(signal.symbol, 0),
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 )
 
             await self.execution_engine.sync_positions(
@@ -448,7 +454,7 @@ class TradingBot:
                     await self.db.insert_trade(
                         Trade(
                             id=None,
-                            timestamp=datetime.utcnow(),
+                            timestamp=datetime.now(timezone.utc),
                             symbol=order.symbol,
                             side=order.side.value,
                             size=order.filled_size,
@@ -507,7 +513,7 @@ class TradingBot:
     async def _check_hourly_summary(self, account_state: AccountState):
         assert self.metrics is not None
         assert self.alerter is not None
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if self._last_summary_time:
             hours_since = (now - self._last_summary_time).total_seconds() / 3600
@@ -561,8 +567,9 @@ class TradingBot:
         if self.watchdog:
             await self.watchdog.stop()
 
-        if self.stop_manager:
-            await self.stop_manager.cancel_all_stops()
+        # Stops are NOT cancelled here — they are reduce-only safety nets that
+        # protect positions during restarts.  On next startup,
+        # load_existing_stops() will hydrate StopManager from the exchange.
 
         if self.data_streamer:
             await self.data_streamer.stop()
@@ -581,10 +588,34 @@ class TradingBot:
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="Live Trading Bot")
+    parser.add_argument(
+        "--close-all",
+        action="store_true",
+        help="Close all positions, cancel all orders (including stops), then exit",
+    )
+    args = parser.parse_args()
+
     bot = TradingBot()
 
     try:
         await bot.initialize()
+
+        if args.close_all:
+            logger.info("--close-all: closing all positions and cancelling all orders")
+            await bot.client.cancel_all_orders()
+            account_state = await bot.client.get_account_state()
+            from exchange.types import OrderSide, OrderType
+
+            for sym, pos in account_state.positions.items():
+                side = OrderSide.SELL if pos.side.value == "long" else OrderSide.BUY
+                await bot.client.place_order(
+                    sym, side, pos.size, OrderType.MARKET, reduce_only=True
+                )
+                logger.info(f"Closed {sym}: {pos.size} {pos.side.value}")
+            await bot.shutdown()
+            return
+
         await bot.run()
     except Exception as e:
         print(f"Fatal error: {e}")

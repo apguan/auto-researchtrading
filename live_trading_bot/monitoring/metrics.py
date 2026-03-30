@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 import math
@@ -56,7 +56,7 @@ class MetricsTracker:
         pnl: Optional[float] = None,
     ):
         trade = TradeRecord(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             symbol=symbol,
             side=side,
             size=size,
@@ -82,7 +82,7 @@ class MetricsTracker:
         positions: Dict[str, float],
         unrealized_pnl: float = 0.0,
     ):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if not self.snapshots or now.date() != self.snapshots[-1].timestamp.date():
             self.daily_start_equity = equity

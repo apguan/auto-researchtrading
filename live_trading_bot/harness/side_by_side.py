@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Run dry-run and live bot instances side-by-side on 1m intervals, then compare signals.
+"""Run dry-run and live bot instances side-by-side, comparing signals.
 
 Usage:
     cd live_trading_bot
-    python harness/side_by_side.py --duration 5m --dry-runs 2 --live-runs 1
+    python harness/side_by_side.py --dry-runs 2 --live-runs 1
+    python harness/side_by_side.py --duration 5m          # fixed duration (local testing)
 
 Requires HYPERLIQUID_PRIVATE_KEY in environment or .env file.
 Each instance gets its own DB and log file in a temp directory.
-After the duration, all bots are stopped and signals are compared.
+
+When --duration is omitted the harness runs until SIGTERM/SIGINT (suitable
+for Railway deployment where the process should stay up indefinitely).
 """
 
 import argparse
@@ -82,54 +85,6 @@ def signal_direction(target_pos: float) -> str:
     return "FLAT"
 
 
-def cleanup_live_positions(db_path: str = ""):
-    """Close any open positions on the exchange. Optionally log to DB."""
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import get_private_key
-    from exchange.hyperliquid import HyperliquidClient, OrderSide, OrderType
-
-    async def _close():
-        pk = get_private_key()
-        client = HyperliquidClient(private_key=pk)
-        state = await client.get_account_state()
-
-        if not state.positions:
-            print("    No open positions to clean up.")
-            await client.close()
-            return
-
-        conn = sqlite3.connect(db_path) if db_path else None
-        for sym, pos in state.positions.items():
-            side = OrderSide.SELL if pos.side.value == "long" else OrderSide.BUY
-            order = await client.place_order(
-                sym, side, pos.size, OrderType.MARKET, reduce_only=True
-            )
-            print(
-                f"    Closed {sym}: {pos.size} {pos.side.value} "
-                f"@ {order.avg_fill_price} ({order.status.value})"
-            )
-            if conn:
-                conn.execute(
-                    "INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, NULL, 'harness_cleanup', ?)",
-                    (
-                        datetime.now(timezone.utc).isoformat(),
-                        sym,
-                        side.value,
-                        order.filled_size,
-                        order.avg_fill_price,
-                        order.filled_size * 0.0005,
-                        order.id,
-                    ),
-                )
-        if conn:
-            conn.commit()
-            conn.close()
-        await client.close()
-
-    asyncio.run(_close())
-
-
 def compare_instances(instances: list[dict]):
     """Compare signals across all instances."""
     print("\n" + "=" * 70)
@@ -144,7 +99,6 @@ def compare_instances(instances: list[dict]):
             f"\n  {inst['name']} ({mode}): "
             f"{len(signals)} signals, {len(trades)} trades"
         )
-        # Show signal breakdown by symbol
         by_symbol = defaultdict(list)
         for s in signals:
             by_symbol[s["symbol"]].append(s)
@@ -152,7 +106,6 @@ def compare_instances(instances: list[dict]):
             directions = [signal_direction(s["target_position"]) for s in sigs]
             print(f"    {sym}: {len(sigs)} signals — {', '.join(directions)}")
 
-    # Pairwise agreement between all instances
     if len(instances) < 2:
         print("\nNeed at least 2 instances to compare.")
         return
@@ -163,9 +116,7 @@ def compare_instances(instances: list[dict]):
 
     for i in range(len(instances)):
         for j in range(i + 1, len(instances)):
-            a = instances[i]
-            b = instances[j]
-            _compare_pair(a, b)
+            _compare_pair(instances[i], instances[j])
 
 
 def _compare_pair(a: dict, b: dict):
@@ -177,8 +128,7 @@ def _compare_pair(a: dict, b: dict):
     b_sigs = b["signals"]
 
     if not a_sigs and not b_sigs:
-        print("    Both produced 0 signals — nothing to compare.")
-        print("    (Strategy may still be warming up. Try a longer duration.)")
+        print("    Both produced 0 signals.")
         return
 
     if not a_sigs or not b_sigs:
@@ -186,28 +136,15 @@ def _compare_pair(a: dict, b: dict):
         print("    Cannot compare — one instance produced no signals.")
         return
 
-    # Group by (timestamp_minute, symbol) for alignment
     def group_key(sig):
-        # Round timestamp to nearest minute for alignment
         ts = sig["timestamp"]
-        return (ts[:16], sig["symbol"])  # "YYYY-MM-DD HH:MM" + symbol
+        return (ts[:16], sig["symbol"])
 
-    a_by_key = {}
-    for s in a_sigs:
-        k = group_key(s)
-        a_by_key[k] = s
-
-    b_by_key = {}
-    for s in b_sigs:
-        k = group_key(s)
-        b_by_key[k] = s
+    a_by_key = {group_key(s): s for s in a_sigs}
+    b_by_key = {group_key(s): s for s in b_sigs}
 
     all_keys = sorted(set(a_by_key.keys()) | set(b_by_key.keys()))
-    agree = 0
-    disagree = 0
-    a_only = 0
-    b_only = 0
-
+    agree = disagree = a_only = b_only = 0
     divergences = []
 
     for key in all_keys:
@@ -237,7 +174,6 @@ def _compare_pair(a: dict, b: dict):
     print(f"    Direction agreement: {agree}/{total} ({pct:.0f}%)")
     print(f"    Signals only in {a['name']}: {a_only}")
     print(f"    Signals only in {b['name']}: {b_only}")
-
     if divergences:
         print(f"    First divergences:")
         for d in divergences:
@@ -249,7 +185,8 @@ def main():
         description="Run dry-run and live bot instances side-by-side"
     )
     parser.add_argument(
-        "--duration", default="5m", help="How long to run (e.g. 5m, 300s, 1h)"
+        "--duration", default=None,
+        help="How long to run (e.g. 5m, 1h). Omit to run until SIGTERM.",
     )
     parser.add_argument(
         "--dry-runs", type=int, default=2, help="Number of dry-run instances"
@@ -262,7 +199,7 @@ def main():
     )
     args = parser.parse_args()
 
-    duration_secs = parse_duration(args.duration)
+    duration_secs = parse_duration(args.duration) if args.duration else None
     bot_dir = Path(__file__).resolve().parent.parent
     bot_script = bot_dir / "bot.py"
 
@@ -270,28 +207,19 @@ def main():
         print(f"ERROR: bot.py not found at {bot_script}")
         sys.exit(1)
 
-    if args.live_runs > 0:
-        print("Closing any leftover positions...")
-        try:
-            cleanup_live_positions()
-        except Exception as e:
-            print(f"  Warning: startup cleanup failed: {e}")
-        print()
-
     work_dir = tempfile.mkdtemp(prefix="side_by_side_")
+    mode_str = f"{duration_secs}s" if duration_secs else "indefinite (until SIGTERM)"
     print(f"Work directory: {work_dir}")
-    print(f"Duration: {duration_secs}s")
+    print(f"Duration: {mode_str}")
     print(f"Instances: {args.dry_runs} dry-run + {args.live_runs} live")
     print(f"Interval: {args.interval}")
     print()
 
     instances = []
-    processes = []
 
     for i in range(args.dry_runs + args.live_runs):
         is_dry = i < args.dry_runs
         name = f"dry_{i}" if is_dry else f"live_{i - args.dry_runs}"
-        mode = "DRY-RUN" if is_dry else "LIVE"
 
         inst_dir = os.path.join(work_dir, name)
         os.makedirs(inst_dir, exist_ok=True)
@@ -314,11 +242,9 @@ def main():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        # Stream subprocess output with instance name prefix
         t = threading.Thread(target=_stream_output, args=(proc, name), daemon=True)
         t.start()
 
-        processes.append(proc)
         instances.append({
             "name": name,
             "dry_run": is_dry,
@@ -327,7 +253,6 @@ def main():
             "proc": proc,
         })
 
-    # Handle SIGTERM (sent by Railway on redeploy) the same as KeyboardInterrupt
     _shutdown_requested = False
 
     def _handle_sigterm(signum, frame):
@@ -337,24 +262,27 @@ def main():
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    print(f"\nAll instances started. Waiting {duration_secs}s...")
+    print(f"\nAll instances started.")
     print(f"(Signals may take a minute to appear after first bar completes)\n")
 
     try:
-        for elapsed in range(duration_secs):
+        elapsed = 0
+        while True:
             if _shutdown_requested:
                 break
+            if duration_secs and elapsed >= duration_secs:
+                break
             time.sleep(1)
-            # Check if any process died early
+            elapsed += 1
+            # Check for early exits
             for inst in instances:
                 rc = inst["proc"].poll()
-                if rc is not None:
-                    print(f"  WARNING: {inst['name']} exited early (code {rc})")
+                if rc is not None and rc != 0:
+                    print(f"  WARNING: {inst['name']} exited (code {rc})")
             # Progress every 30s
-            if (elapsed + 1) % 30 == 0:
-                mins = (elapsed + 1) // 60
-                secs = (elapsed + 1) % 60
-                # Count signals so far
+            if elapsed % 30 == 0:
+                mins = elapsed // 60
+                secs = elapsed % 60
                 counts = []
                 for inst in instances:
                     sigs = extract_signals(inst["db_path"])
@@ -363,15 +291,13 @@ def main():
                     counts.append(f"{inst['name']}={len(sigs)}sig/{len(trades)}trd(last:{last})")
                 print(f"  [{mins}m{secs:02d}s] {', '.join(counts)}", flush=True)
     except KeyboardInterrupt:
-        print("\nInterrupted early.")
+        pass
 
     print("\nStopping all instances...")
     for inst in instances:
-        proc = inst["proc"]
-        if proc.poll() is None:
-            proc.send_signal(signal.SIGINT)
+        if inst["proc"].poll() is None:
+            inst["proc"].send_signal(signal.SIGINT)
 
-    # Give them time to shut down gracefully
     for inst in instances:
         try:
             inst["proc"].wait(timeout=15)
@@ -379,20 +305,11 @@ def main():
             inst["proc"].kill()
             inst["proc"].wait()
 
-    # Close any live positions left open and log to the live instance's DB
-    live_instances = [inst for inst in instances if not inst["dry_run"]]
-    if live_instances:
-        print("\nCleaning up live positions...")
-        for inst in live_instances:
-            print(f"  {inst['name']}:")
-            try:
-                cleanup_live_positions(inst["db_path"])
-            except Exception as e:
-                print(f"    Cleanup failed: {e}")
+    # No position cleanup — bot.py shutdown preserves stops and positions
+    # across restarts.  Use `bot.py --close-all` for deliberate teardowns.
 
     print("\nAll instances stopped.\n")
 
-    # Extract signals and compare
     for inst in instances:
         inst["signals"] = extract_signals(inst["db_path"])
         inst["trades"] = extract_trades(inst["db_path"])

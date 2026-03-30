@@ -4,7 +4,7 @@ Each instance gets its own .db file — no shared state, no connection pooling n
 """
 
 import aiosqlite
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from .models import Trade, SignalRecord, RiskEvent
@@ -127,7 +127,7 @@ class SqliteRepository:
 
     async def get_daily_pnl(self, symbol: Optional[str] = None) -> float:
         assert self._db is not None
-        today_start = datetime.utcnow().replace(
+        today_start = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         ).isoformat()
 
