@@ -36,10 +36,11 @@ _this_dir = Path(__file__).resolve().parent
 _pipeline_root = _this_dir.parent
 _repo_root = _pipeline_root.parent
 _live_bot_root = _repo_root / "live_trading_bot"
-for _p in (_this_dir, _pipeline_root, _repo_root, _live_bot_root):
+for _p in (_this_dir, _pipeline_root, _live_bot_root):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
+sys.path = [p for p in sys.path if Path(p).resolve() != _repo_root]
 
 from backtest_interval import run_backtest_1m, load_data
 import strategies.strategy_15m as s15m
