@@ -1,6 +1,14 @@
 import asyncpg
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Dict
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+from constants import PARAM_COLUMNS
 
 from .models import Trade, Position, SignalRecord, RiskEvent, ParamSnapshot
 from config import get_settings
@@ -217,45 +225,6 @@ class SupabaseRepository:
 
     # --- Parameter Snapshots (flat: one row per run with all params) ---
 
-    PARAM_COLUMNS = [
-        "SHORT_WINDOW",
-        "MED_WINDOW",
-        "MED2_WINDOW",
-        "LONG_WINDOW",
-        "EMA_FAST",
-        "EMA_SLOW",
-        "RSI_PERIOD",
-        "RSI_BULL",
-        "RSI_BEAR",
-        "RSI_OVERBOUGHT",
-        "RSI_OVERSOLD",
-        "MACD_FAST",
-        "MACD_SLOW",
-        "MACD_SIGNAL",
-        "BB_PERIOD",
-        "FUNDING_LOOKBACK",
-        "FUNDING_BOOST",
-        "BASE_POSITION_PCT",
-        "VOL_LOOKBACK",
-        "TARGET_VOL",
-        "ATR_LOOKBACK",
-        "ATR_STOP_MULT",
-        "TAKE_PROFIT_PCT",
-        "BASE_THRESHOLD",
-        "BTC_OPPOSE_THRESHOLD",
-        "PYRAMID_THRESHOLD",
-        "PYRAMID_SIZE",
-        "CORR_LOOKBACK",
-        "HIGH_CORR_THRESHOLD",
-        "DD_REDUCE_THRESHOLD",
-        "DD_REDUCE_SCALE",
-        "COOLDOWN_BARS",
-        "MIN_VOTES",
-        "THRESHOLD_MIN",
-        "THRESHOLD_MAX",
-        "BB_COMPRESS_PCTILE",
-    ]
-
     async def insert_param_snapshot(
         self,
         snapshot: ParamSnapshot,
@@ -266,10 +235,10 @@ class SupabaseRepository:
             "max_drawdown_pct, profit_factor, win_rate_pct, "
             "num_trades, ret_dd_ratio, is_best, previous_snapshot_id"
         )
-        param_cols = ", ".join(self.PARAM_COLUMNS)
+        param_cols = ", ".join(PARAM_COLUMNS)
         all_cols = f"{metric_cols}, {param_cols}"
         placeholders = ", ".join(
-            ["$" + str(i) for i in range(1, 13 + len(self.PARAM_COLUMNS))]
+            ["$" + str(i) for i in range(1, 13 + len(PARAM_COLUMNS))]
         )
 
         values = [
@@ -286,7 +255,7 @@ class SupabaseRepository:
             snapshot.is_best,
             snapshot.previous_snapshot_id,
         ]
-        for col in self.PARAM_COLUMNS:
+        for col in PARAM_COLUMNS:
             values.append(float(params.get(col, 0)))
 
         row = await self.pool.fetchrow(
@@ -302,7 +271,7 @@ class SupabaseRepository:
         return snapshot_id
 
     def _row_to_snapshot(self, row) -> ParamSnapshot:
-        params = {col: float(row[col]) for col in self.PARAM_COLUMNS}
+        params = {col: float(row[col]) for col in PARAM_COLUMNS}
         return ParamSnapshot(
             id=row["id"],
             run_date=row["run_date"],

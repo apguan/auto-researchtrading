@@ -1,13 +1,20 @@
 """15-minute resolution strategy — scaled from hourly base (1 hour = 4 bars)."""
 
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 from prepare import Signal, PortfolioState, BarData
 
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
-SYMBOL_WEIGHTS = {"BTC": 0.25, "ETH": 0.25, "SOL": 0.25, "XRP": 0.25, "HYPE": 0.25}
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+from constants import INTERVAL_SYMBOLS, make_equal_weights, PARAM_COLUMNS
+
+ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["15m"]
+SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 24  # 6h
 MED_WINDOW = 48  # 12h
@@ -436,45 +443,6 @@ def _load_params_from_db():
         "BB_COMPRESS_PCTILE",
     }
 
-    PARAM_COLUMNS = [
-        "SHORT_WINDOW",
-        "MED_WINDOW",
-        "MED2_WINDOW",
-        "LONG_WINDOW",
-        "EMA_FAST",
-        "EMA_SLOW",
-        "RSI_PERIOD",
-        "RSI_BULL",
-        "RSI_BEAR",
-        "RSI_OVERBOUGHT",
-        "RSI_OVERSOLD",
-        "MACD_FAST",
-        "MACD_SLOW",
-        "MACD_SIGNAL",
-        "BB_PERIOD",
-        "FUNDING_LOOKBACK",
-        "FUNDING_BOOST",
-        "BASE_POSITION_PCT",
-        "VOL_LOOKBACK",
-        "TARGET_VOL",
-        "ATR_LOOKBACK",
-        "ATR_STOP_MULT",
-        "TAKE_PROFIT_PCT",
-        "BASE_THRESHOLD",
-        "BTC_OPPOSE_THRESHOLD",
-        "PYRAMID_THRESHOLD",
-        "PYRAMID_SIZE",
-        "CORR_LOOKBACK",
-        "HIGH_CORR_THRESHOLD",
-        "DD_REDUCE_THRESHOLD",
-        "DD_REDUCE_SCALE",
-        "COOLDOWN_BARS",
-        "MIN_VOTES",
-        "THRESHOLD_MIN",
-        "THRESHOLD_MAX",
-        "BB_COMPRESS_PCTILE",
-    ]
-
     try:
         env_path = Path(__file__).resolve().parent.parent / ".env"
         load_dotenv(env_path)
@@ -498,11 +466,11 @@ def _load_params_from_db():
         global _SYMBOL_PARAMS
         _SYMBOL_PARAMS = {}
         for row in rows:
-            raw = dict(zip(col_names, row))
+            raw = {k.lower(): v for k, v in zip(col_names, row)}
             symbol = raw.get("symbol", "ALL")
             symbol_params = {}
             for col in PARAM_COLUMNS:
-                val = raw[col]
+                val = raw[col.lower()]
                 if col in INT_PARAMS:
                     val = int(val)
                 else:

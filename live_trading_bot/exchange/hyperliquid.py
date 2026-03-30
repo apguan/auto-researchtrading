@@ -9,13 +9,21 @@ For simulated trading, see dry_exchange.py.
 """
 
 import asyncio
+import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from eth_account import Account
 from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+from constants import HYPERLIQUID_API_URL as MAINNET_URL  # noqa: E402
 
 from .types import (
     Order,
@@ -31,8 +39,6 @@ from monitoring.logger import get_logger
 from config import get_settings
 
 logger = get_logger(__name__)
-
-MAINNET_URL = "https://api.hyperliquid.xyz"
 
 
 # ── Shared helpers ──────────────────────────────────────────────────

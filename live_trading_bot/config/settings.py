@@ -1,13 +1,24 @@
 from dataclasses import dataclass, field
 from typing import List, Dict
 import os
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
+from constants import ALL_SYMBOLS, INTERVAL_SYMBOLS, make_equal_weights, LOOKBACK_BARS
+from constants import STRATEGY_DEFAULTS as _STRATEGY_DEFAULTS
+
+_HOUR_DEFAULTS = _STRATEGY_DEFAULTS["1h"]
 
 
 @dataclass
 class Settings:
-    TRADING_PAIRS: List[str] = field(default_factory=lambda: ["BTC", "ETH", "SOL"])
+    TRADING_PAIRS: List[str] = field(default_factory=lambda: list(ALL_SYMBOLS))
     SYMBOL_WEIGHTS: Dict[str, float] = field(
-        default_factory=lambda: {"BTC": 0.33, "ETH": 0.33, "SOL": 0.33}
+        default_factory=lambda: make_equal_weights(ALL_SYMBOLS)
     )
     BAR_INTERVAL: str = "15m"
     # LOOKBACK_BARS scales per interval: 1m→2000, 5m→1000, 15m→500, 1h→500
@@ -26,26 +37,26 @@ class Settings:
     COOLDOWN_BARS: int = 2
     MIN_VOTES: int = 4
 
-    SHORT_WINDOW: int = 6
-    MED_WINDOW: int = 12
-    MED2_WINDOW: int = 24
-    LONG_WINDOW: int = 36
-    EMA_FAST: int = 7
-    EMA_SLOW: int = 26
-    RSI_PERIOD: int = 8
-    RSI_BULL: float = 50.0
-    RSI_BEAR: float = 50.0
-    RSI_OVERBOUGHT: float = 69.0
-    RSI_OVERSOLD: float = 31.0
-    MACD_FAST: int = 14
-    MACD_SLOW: int = 23
-    MACD_SIGNAL: int = 9
-    BB_PERIOD: int = 7
-    ATR_LOOKBACK: int = 24
-    ATR_STOP_MULT: float = 5.5
-    TARGET_VOL: float = 0.015
-    VOL_LOOKBACK: int = 36
-    BASE_THRESHOLD: float = 0.012
+    SHORT_WINDOW: int = int(_HOUR_DEFAULTS["SHORT_WINDOW"])
+    MED_WINDOW: int = int(_HOUR_DEFAULTS["MED_WINDOW"])
+    MED2_WINDOW: int = int(_HOUR_DEFAULTS["MED2_WINDOW"])
+    LONG_WINDOW: int = int(_HOUR_DEFAULTS["LONG_WINDOW"])
+    EMA_FAST: int = int(_HOUR_DEFAULTS["EMA_FAST"])
+    EMA_SLOW: int = int(_HOUR_DEFAULTS["EMA_SLOW"])
+    RSI_PERIOD: int = int(_HOUR_DEFAULTS["RSI_PERIOD"])
+    RSI_BULL: float = float(_HOUR_DEFAULTS["RSI_BULL"])
+    RSI_BEAR: float = float(_HOUR_DEFAULTS["RSI_BEAR"])
+    RSI_OVERBOUGHT: float = float(_HOUR_DEFAULTS["RSI_OVERBOUGHT"])
+    RSI_OVERSOLD: float = float(_HOUR_DEFAULTS["RSI_OVERSOLD"])
+    MACD_FAST: int = int(_HOUR_DEFAULTS["MACD_FAST"])
+    MACD_SLOW: int = int(_HOUR_DEFAULTS["MACD_SLOW"])
+    MACD_SIGNAL: int = int(_HOUR_DEFAULTS["MACD_SIGNAL"])
+    BB_PERIOD: int = int(_HOUR_DEFAULTS["BB_PERIOD"])
+    ATR_LOOKBACK: int = int(_HOUR_DEFAULTS["ATR_LOOKBACK"])
+    ATR_STOP_MULT: float = float(_HOUR_DEFAULTS["ATR_STOP_MULT"])
+    TARGET_VOL: float = float(_HOUR_DEFAULTS["TARGET_VOL"])
+    VOL_LOOKBACK: int = int(_HOUR_DEFAULTS["VOL_LOOKBACK"])
+    BASE_THRESHOLD: float = float(_HOUR_DEFAULTS["BASE_THRESHOLD"])
 
     HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
     HYPERLIQUID_WS_URL: str = "wss://api.hyperliquid.xyz/ws"
@@ -88,8 +99,17 @@ class Settings:
     def from_env(cls) -> "Settings":
         settings = cls()
 
+        # Resolve BAR_INTERVAL first so TRADING_PAIRS can default from it
+        if val := os.getenv("BAR_INTERVAL"):
+            settings.BAR_INTERVAL = val
+
         if val := os.getenv("TRADING_PAIRS"):
             settings.TRADING_PAIRS = val.split(",")
+        else:
+            settings.TRADING_PAIRS = list(
+                INTERVAL_SYMBOLS.get(settings.BAR_INTERVAL, ALL_SYMBOLS)
+            )
+        settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
 
         if val := os.getenv("MAX_LEVERAGE"):
             settings.MAX_LEVERAGE = float(val)
@@ -112,9 +132,6 @@ class Settings:
         if val := os.getenv("SUPABASE_DB_URL"):
             settings.SUPABASE_DB_URL = val
 
-        if val := os.getenv("BAR_INTERVAL"):
-            settings.BAR_INTERVAL = val
-
         if val := os.getenv("STRATEGY_MODULE"):
             settings.STRATEGY_MODULE = val
         else:
@@ -133,10 +150,7 @@ class Settings:
         else:
             # Must be >= strategy's max(LONG_WINDOW, ...) + 1 to generate signals.
             # 1m LONG_WINDOW=720 needs 721+; 5m LONG_WINDOW=432 needs 433+.
-            _interval_lookback_map = {"1m": 1000, "5m": 1000, "15m": 500, "1h": 500}
-            settings.LOOKBACK_BARS = _interval_lookback_map.get(
-                settings.BAR_INTERVAL, 500
-            )
+            settings.LOOKBACK_BARS = LOOKBACK_BARS.get(settings.BAR_INTERVAL, 500)
 
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
             settings.DRY_RUN_INITIAL_CAPITAL = float(val)

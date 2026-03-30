@@ -19,6 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.append(str(_REPO_ROOT))
+
 from config import get_settings
 from config.settings import Settings
 from exchange import create_exchange, Exchange
@@ -186,6 +190,7 @@ class TradingBot:
         self._bar_count += 1
 
         import time as _time
+
         now = _time.time()
         if now - self._last_heartbeat >= 600:
             self._last_heartbeat = now
@@ -193,7 +198,9 @@ class TradingBot:
                 "Heartbeat",
                 extra={
                     "bars_total": self._bar_count,
-                    "positions": {s: round(v, 4) for s, v in self._current_positions.items()},
+                    "positions": {
+                        s: round(v, 4) for s, v in self._current_positions.items()
+                    },
                 },
             )
 

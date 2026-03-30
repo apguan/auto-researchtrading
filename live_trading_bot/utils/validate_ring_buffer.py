@@ -32,17 +32,20 @@ for _p in (_pipeline_backtest, _bot_root, _repo_root):
 
 from prepare import BarData, Signal, PortfolioState
 
+from constants import (
+    ALL_SYMBOLS as SYMBOLS,
+    BACKTEST_CAPITAL as INITIAL_CAPITAL,
+    INTERVAL_MINUTES,
+    SLIPPAGE_BPS,
+    TAKER_FEE,
+)
+
 # ---------------------------------------------------------------------------
 # Constants (must match backtest_interval.py exactly)
 # ---------------------------------------------------------------------------
-INITIAL_CAPITAL = 10_000.0
-TAKER_FEE = 0.0005
-SLIPPAGE_BPS = 1.0
 MAX_LEVERAGE = 20
 MINUTES_PER_YEAR = 525_600
-INTERVAL_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
 FUNDING_BARS_MAP = {"1m": 480, "5m": 96, "15m": 32, "1h": 8}
-SYMBOLS = ["BTC", "ETH", "SOL", "XRP"]
 
 
 # ---------------------------------------------------------------------------
