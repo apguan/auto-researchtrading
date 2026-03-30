@@ -10,8 +10,7 @@ Runs at midnight daily to:
    - Forward stepwise accumulation of all validated results
    - Adaptive multi-parameter grid from stepwise best
    - Out-of-sample validation of final candidate
-3. Save optimization results to Supabase PostgreSQL param_snapshots table
-4. Save best parameters to active_params table (source of truth for strategy)
+ 3. Save best parameters to Supabase PostgreSQL param_snapshots table (is_active = TRUE)
 """
 
 import sys
@@ -99,7 +98,7 @@ def run_full_optimization(
     """Run the complete optimisation pipeline.
 
     Returns:
-        (best_params, all_validated_results, oos_result_or_None)
+        (best_params, all_validated_results, wf_result_or_None)
         best_params is a full parameter dict (DEFAULTS + overrides).
     """
     from backtest.tune_15m import (
@@ -110,7 +109,7 @@ def run_full_optimization(
         run_sweep,
         score_result,
         forward_stepwise_accumulate,
-        run_oos,
+        run_walk_forward,
         subsample_data,
         revalidate,
     )
@@ -279,37 +278,37 @@ def run_full_optimization(
         logger.error("  Adaptive multi-grid failed: %s", exc)
     logger.info("Adaptive multi-grid done in %.1fs", time.time() - t0)
 
-    # ---- Phase 4: OOS validation ----
-    oos_result = None
+    # ---- Phase 4: Walk-forward validation ----
+    wf_result = None
     if not skip_oos:
-        logger.info("Phase 4/4: OOS validation...")
+        logger.info("Phase 4/4: Walk-forward validation...")
         t0 = time.time()
         try:
-            oos_result = run_oos(data, best_params)
-            deg = oos_result.get("degradation", float("inf"))
-            if deg < 0.3:
+            wf_result = run_walk_forward(data, best_params)
+            avg_deg = wf_result.get("avg_degradation", float("inf"))
+            consistent = wf_result.get("consistent", False)
+            if consistent and avg_deg < 0.3:
                 verdict = "PASS"
-            elif deg < 0.6:
+            elif consistent and avg_deg < 0.5:
                 verdict = "CAUTION"
             else:
-                verdict = "FAIL — likely overfit"
+                verdict = "FAIL"
             logger.info(
-                "OOS: IS_score=%.2f OOS_score=%.2f degradation=%.1f%% [%s]",
-                oos_result.get("IS_score", 0),
-                oos_result.get("OOS_score", 0),
-                deg * 100,
+                "Walk-forward: avg_degradation=%.1f%% consistent=%s [%s]",
+                avg_deg * 100,
+                consistent,
                 verdict,
             )
         except Exception as exc:
-            logger.error("  OOS validation failed: %s", exc)
-        logger.info("OOS validation done in %.1fs", time.time() - t0)
+            logger.error("  Walk-forward validation failed: %s", exc)
+        logger.info("Walk-forward validation done in %.1fs", time.time() - t0)
 
     # Attach _ret_dd to all results for DB persistence compatibility
     for r in all_validated:
         dd = r.get("max_drawdown_pct", 0)
         r["_ret_dd"] = r.get("total_return_pct", 0) / max(dd, 0.01)
 
-    return best_params, all_validated, oos_result
+    return best_params, all_validated, wf_result
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +347,10 @@ def save_to_database(
         logger.error("SUPABASE_DB_URL not set — cannot save to database")
         return
 
+    if best is None:
+        logger.warning("No best result — nothing to save to database")
+        return
+
     PARAM_COLUMNS = list(DEFAULTS.keys())
 
     conn = None
@@ -355,58 +358,59 @@ def save_to_database(
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
         run_date = datetime.now(timezone.utc).isoformat()
-        inserted = 0
 
         prev_snapshot_id = None
         cur.execute(
-            "SELECT id FROM param_snapshots WHERE is_best = TRUE ORDER BY run_date DESC LIMIT 1"
+            "SELECT id FROM param_snapshots WHERE is_active = TRUE ORDER BY run_date DESC LIMIT 1"
         )
         row = cur.fetchone()
         if row:
             prev_snapshot_id = row[0]
 
+        cur.execute(
+            "UPDATE param_snapshots SET is_active = FALSE WHERE is_active = TRUE"
+        )
+
+        full_params = dict(DEFAULTS)
+        full_params.update(best.get("params", {}))
+        sweep_name = best.get("sweep_name", "")
+        ret_dd = best.get("total_return_pct", 0) / max(
+            best.get("max_drawdown_pct", 0.01), 0.01
+        )
+
         cols = (
             "run_date, sweep_name, sharpe, total_return_pct, "
             "max_drawdown_pct, profit_factor, win_rate_pct, "
-            "num_trades, ret_dd_ratio, is_best, period, previous_snapshot_id, "
+            "num_trades, ret_dd_ratio, is_best, is_active, period, previous_snapshot_id, "
             + ", ".join(PARAM_COLUMNS)
         )
-        placeholders = ", ".join(["%s"] * (12 + len(PARAM_COLUMNS)))
+        placeholders = ", ".join(["%s"] * (13 + len(PARAM_COLUMNS)))
 
-        for r in all_results:
-            is_best = best is not None and r is best
-            full_params = dict(DEFAULTS)
-            full_params.update(r.get("params", {}))
-            sweep_name = r.get("sweep_name", "")
-            ret_dd = r.get("total_return_pct", 0) / max(
-                r.get("max_drawdown_pct", 0.01), 0.01
-            )
+        values = [
+            run_date,
+            sweep_name,
+            float(best.get("sharpe", 0)),
+            float(best.get("total_return_pct", 0)),
+            float(best.get("max_drawdown_pct", 0)),
+            float(best.get("profit_factor", 0)),
+            float(best.get("win_rate_pct", 0)),
+            int(best.get("num_trades", 0)),
+            float(ret_dd),
+            True,
+            True,
+            period,
+            prev_snapshot_id,
+        ]
+        for p in PARAM_COLUMNS:
+            values.append(float(full_params[p]))
 
-            values = [
-                run_date,
-                sweep_name,
-                float(r.get("sharpe", 0)),
-                float(r.get("total_return_pct", 0)),
-                float(r.get("max_drawdown_pct", 0)),
-                float(r.get("profit_factor", 0)),
-                float(r.get("win_rate_pct", 0)),
-                int(r.get("num_trades", 0)),
-                float(ret_dd),
-                is_best,
-                period,
-                prev_snapshot_id if is_best else None,
-            ]
-            for p in PARAM_COLUMNS:
-                values.append(float(full_params[p]))
-
-            cur.execute(
-                f"INSERT INTO param_snapshots ({cols}) VALUES ({placeholders})",
-                values,
-            )
-            inserted += 1
+        cur.execute(
+            f"INSERT INTO param_snapshots ({cols}) VALUES ({placeholders})",
+            values,
+        )
 
         conn.commit()
-        logger.info("Saved %d snapshots to database", inserted)
+        logger.info("Saved best snapshot to database (is_active=TRUE)")
     except Exception as exc:
         logger.error("Database insert failed: %s", exc)
         if conn:
@@ -443,7 +447,7 @@ def _compute_period(data: dict) -> str:
 def _print_summary(
     best: dict | None,
     best_params: dict | None,
-    oos_result: dict | None,
+    wf_result: dict | None,
     total_results: int,
     elapsed: float,
 ) -> None:
@@ -472,14 +476,17 @@ def _print_summary(
     logger.info("  Win rate:        %.1f%%", best.get("win_rate_pct", 0))
     logger.info("  Trades:          %d", best.get("num_trades", 0))
 
-    if oos_result:
-        deg = oos_result.get("degradation", float("inf"))
-        logger.info("OOS validation:")
-        logger.info("  IS score:        %.2f", oos_result.get("IS_score", 0))
-        logger.info("  OOS score:       %.2f", oos_result.get("OOS_score", 0))
-        logger.info("  IS return:       %.2f%%", oos_result.get("IS_return", 0))
-        logger.info("  OOS return:      %.2f%%", oos_result.get("OOS_return", 0))
-        logger.info("  Degradation:     %.1f%%", deg * 100)
+    if wf_result:
+        logger.info("Walk-forward validation:")
+        logger.info(
+            "  Avg degradation:  %.1f%%", wf_result.get("avg_degradation", 0) * 100
+        )
+        logger.info(
+            "  Worst degradation: %.1f%%", wf_result.get("worst_degradation", 0) * 100
+        )
+        logger.info("  Consistent:       %s", wf_result.get("consistent", False))
+        logger.info("  Avg test return:  %.2f%%", wf_result.get("avg_test_return", 0))
+        logger.info("  Folds:            %d", wf_result.get("n_folds", 0))
 
     logger.info("=" * 60)
 
@@ -551,7 +558,7 @@ def main() -> None:
         # 2. Run optimisation (sweeps + stepwise + adaptive grid + OOS)
         logger.info("Step 2/4: Running full optimisation...")
         t0 = time.time()
-        best_params, all_results, oos_result = run_full_optimization(
+        best_params, all_results, wf_result = run_full_optimization(
             data,
             n_workers=args.workers,
             subsample=args.subsample,
@@ -578,37 +585,9 @@ def main() -> None:
         else:
             logger.info("Step 4/4: Skipping database (--no-db)")
 
-        # Save best to active_params table (source of truth for strategy)
-        if best is not None and not args.no_db:
-            try:
-                from storage.active_params import save_active_params
-                from backtest.tune_15m import DEFAULTS
-
-                full_params = dict(DEFAULTS)
-                full_params.update(best.get("params", {}))
-                ret_dd = float(best.get("total_return_pct", 0)) / max(
-                    float(best.get("max_drawdown_pct", 0.01)), 0.01
-                )
-                metrics = {
-                    "sharpe": float(best.get("sharpe", 0)),
-                    "total_return_pct": float(best.get("total_return_pct", 0)),
-                    "max_drawdown_pct": float(best.get("max_drawdown_pct", 0)),
-                    "profit_factor": float(best.get("profit_factor", 0)),
-                    "win_rate_pct": float(best.get("win_rate_pct", 0)),
-                    "num_trades": int(best.get("num_trades", 0)),
-                    "ret_dd_ratio": ret_dd,
-                }
-                db_url = os.environ.get("SUPABASE_DB_URL", "")
-                save_active_params(
-                    db_url, period, best.get("sweep_name", ""), metrics, full_params
-                )
-                logger.info("Saved best result to active_params table")
-            except Exception as exc:
-                logger.error("Failed to save to active_params: %s", exc)
-
         # Summary
         elapsed = time.time() - t_start
-        _print_summary(best, best_params, oos_result, len(all_results), elapsed)
+        _print_summary(best, best_params, wf_result, len(all_results), elapsed)
 
     except Exception:
         logger.exception("Fatal error in daily_tune")
