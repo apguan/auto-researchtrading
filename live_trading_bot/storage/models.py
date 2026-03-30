@@ -71,6 +71,7 @@ class ParamSnapshot:
     run_date: datetime
     sweep_name: str
     period: str
+    symbol: str
     sharpe: float
     total_return_pct: float
     max_drawdown_pct: float
