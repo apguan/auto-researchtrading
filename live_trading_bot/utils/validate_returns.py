@@ -5,7 +5,8 @@ from pathlib import Path
 
 _repo_root = Path(__file__).resolve().parent.parent.parent
 _bot_root = Path(__file__).resolve().parent.parent
-for _p in (_bot_root, _repo_root):
+_pipeline_backtest = _repo_root / "data_pipeline" / "backtest"
+for _p in (_pipeline_backtest, _bot_root, _repo_root):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
@@ -15,7 +16,8 @@ import strategies.strategy_15m as s15m
 import pandas as pd
 
 data = load_data(
-    interval="15m", data_dir=str(_bot_root / "backtest_data" / "15m_candles")
+    interval="15m",
+    data_dir=str(_repo_root / "data_pipeline" / "backtest_data" / "15m_candles"),
 )
 print(f"Bars: {sum(len(df) for df in data.values())}")
 

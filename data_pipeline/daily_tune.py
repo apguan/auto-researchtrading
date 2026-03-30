@@ -24,13 +24,15 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone
 
-BOT_ROOT = Path(__file__).resolve().parent.parent
-for _p in (BOT_ROOT,):
+PIPELINE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = PIPELINE_ROOT.parent
+
+for _p in (PIPELINE_ROOT, REPO_ROOT):
     _sp = str(_p)
     if _sp not in sys.path:
         sys.path.insert(0, _sp)
 
-LOG_DIR = BOT_ROOT.parent / "logs"
+LOG_DIR = PIPELINE_ROOT / "logs"
 
 logger = logging.getLogger("daily_tune")
 

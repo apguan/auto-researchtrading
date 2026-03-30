@@ -28,14 +28,16 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Path setup — same as daily_tune.py
 # ---------------------------------------------------------------------------
-BOT_ROOT = Path(__file__).resolve().parent.parent
-for _p in (BOT_ROOT,):
+PIPELINE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = PIPELINE_ROOT.parent
+
+for _p in (PIPELINE_ROOT, REPO_ROOT):
     _sp = str(_p)
     if _sp not in sys.path:
         sys.path.insert(0, _sp)
 
-LOG_DIR = BOT_ROOT.parent / "logs"
-RESULTS_DIR = BOT_ROOT.parent / "tuning_results"
+LOG_DIR = PIPELINE_ROOT / "logs"
+RESULTS_DIR = PIPELINE_ROOT / "tuning_results"
 
 logger = logging.getLogger("sliding_window_tune")
 

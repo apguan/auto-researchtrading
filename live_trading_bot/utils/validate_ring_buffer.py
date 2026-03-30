@@ -24,7 +24,8 @@ import pandas as pd
 
 _repo_root = Path(__file__).resolve().parent.parent.parent
 _bot_root = Path(__file__).resolve().parent.parent
-for _p in (_bot_root, _repo_root):
+_pipeline_backtest = _repo_root / "data_pipeline" / "backtest"
+for _p in (_pipeline_backtest, _bot_root, _repo_root):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
@@ -480,7 +481,7 @@ def main():
     import importlib
     import backtest_interval as bi
 
-    data_dir = str(_bot_root / "backtest_data" / "15m_candles")
+    data_dir = str(_repo_root / "data_pipeline" / "backtest_data" / "15m_candles")
     print(f"Loading data from {data_dir}")
     data = bi.load_data(interval="15m", data_dir=data_dir)
     if not data:

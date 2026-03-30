@@ -32,9 +32,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-_this_dir = Path(__file__).resolve().parent  # backtest/
-_bot_root = _this_dir.parent  # live_trading_bot/
-for _p in (_this_dir, _bot_root):
+_this_dir = Path(__file__).resolve().parent
+_pipeline_root = _this_dir.parent
+_repo_root = _pipeline_root.parent
+_live_bot_root = _repo_root / "live_trading_bot"
+for _p in (_this_dir, _pipeline_root, _repo_root, _live_bot_root):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
@@ -174,7 +176,7 @@ def score_result(r: dict) -> float:
 # ---------------------------------------------------------------------------
 # RESULT PERSISTENCE — save/load tuning results for iterative improvement
 # ---------------------------------------------------------------------------
-_RESULTS_DIR = Path(__file__).resolve().parent.parent.parent / "tuning_results"
+_RESULTS_DIR = Path(__file__).resolve().parent.parent / "tuning_results"
 
 
 def _to_native(obj):
@@ -615,7 +617,7 @@ def run_sweep_per_symbol(
     )
 
     if data_dir is None:
-        data_dir = str(_bot_root / "backtest_data" / "15m_candles")
+        data_dir = str(_pipeline_root / "backtest_data" / "15m_candles")
 
     t0 = time.time()
     results: dict[str, list[dict]] = {}
@@ -1207,7 +1209,7 @@ def main():
     args = parser.parse_args()
 
     full_data = load_data(
-        interval="15m", data_dir=str(_bot_root / "backtest_data" / "15m_candles")
+        interval="15m", data_dir=str(_pipeline_root / "backtest_data" / "15m_candles")
     )
     if not full_data:
         print("ERROR: No data loaded")

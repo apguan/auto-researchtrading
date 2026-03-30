@@ -12,7 +12,8 @@ from pathlib import Path
 # Ensure imports work
 _repo_root = Path(__file__).resolve().parent.parent.parent
 _bot_root = Path(__file__).resolve().parent.parent
-for _p in (_bot_root, _repo_root):
+_pipeline_backtest = _repo_root / "data_pipeline" / "backtest"
+for _p in (_pipeline_backtest, _bot_root, _repo_root):
     sp = str(_p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
