@@ -531,12 +531,15 @@ class TradingBot:
 
         self._last_summary_time = now
 
-        daily_pnl = self.metrics.get_daily_pnl()
+        daily_pnl = account_state.total_equity - self.metrics.daily_start_equity
         trade_count = self.metrics.get_trade_count_today()
 
         await self.alerter.send_hourly_summary(
             equity=account_state.total_equity,
-            positions={s: {"size": p} for s, p in self._current_positions.items()},
+            positions={
+                s: {"size": p, "notional": abs(p) * self._current_prices.get(s, 0)}
+                for s, p in self._current_positions.items()
+            },
             daily_pnl=daily_pnl,
             trade_count=trade_count,
         )
