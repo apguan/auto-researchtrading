@@ -1,20 +1,16 @@
 import asyncio
-from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
-from exchange.interface import Exchange
-from exchange.types import (
+from .interface import Exchange
+from .types import (
     Order,
     OrderSide,
     OrderType,
     OrderStatus,
-    Position,
-    PositionSide,
-    AccountState,
 )
-from config import get_settings
-from monitoring.logger import get_logger
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -44,7 +40,7 @@ class OrderManager:
 
             if abs(delta) < 1.0:
                 logger.debug(
-                    f"Signal delta too small",
+                    "Signal delta too small",
                     extra={"symbol": signal.symbol, "delta_usd": delta},
                 )
                 return None
@@ -69,7 +65,7 @@ class OrderManager:
                 return None
 
             logger.info(
-                f"Executing signal",
+                "Executing signal",
                 extra={
                     "symbol": signal.symbol,
                     "side": side.value,
@@ -94,7 +90,7 @@ class OrderManager:
 
                 if order.status == OrderStatus.FILLED:
                     logger.info(
-                        f"Order filled",
+                        "Order filled",
                         extra={
                             "order_id": order.id,
                             "symbol": order.symbol,
@@ -105,7 +101,7 @@ class OrderManager:
                     )
                 elif order.status == OrderStatus.REJECTED:
                     logger.error(
-                        f"Order rejected",
+                        "Order rejected",
                         extra={"symbol": order.symbol, "side": order.side.value},
                     )
 
@@ -113,7 +109,7 @@ class OrderManager:
 
             except Exception as e:
                 logger.error(
-                    f"Failed to execute order",
+                    "Failed to execute order",
                     extra={
                         "symbol": signal.symbol,
                         "side": side.value,
@@ -137,7 +133,7 @@ class OrderManager:
 
             if current_price <= 0:
                 logger.warning(
-                    f"Skipping signal - no price available",
+                    "Skipping signal - no price available",
                     extra={"symbol": signal.symbol},
                 )
                 continue
@@ -151,11 +147,11 @@ class OrderManager:
     async def cancel_all_orders(self, symbol: Optional[str] = None) -> bool:
         try:
             result = await self.client.cancel_all_orders(symbol)
-            logger.info(f"Cancelled all orders", extra={"symbol": symbol})
+            logger.info("Cancelled all orders", extra={"symbol": symbol})
             return result
         except Exception as e:
             logger.error(
-                f"Failed to cancel orders", extra={"symbol": symbol, "error": str(e)}
+                "Failed to cancel orders", extra={"symbol": symbol, "error": str(e)}
             )
             return False
 
@@ -163,7 +159,7 @@ class OrderManager:
         try:
             return await self.client.get_open_orders(symbol)
         except Exception as e:
-            logger.error(f"Failed to get open orders", extra={"error": str(e)})
+            logger.error("Failed to get open orders", extra={"error": str(e)})
             return []
 
     def get_recent_orders(self, limit: int = 100) -> List[Order]:

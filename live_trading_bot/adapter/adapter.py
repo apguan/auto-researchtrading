@@ -32,10 +32,10 @@ _s_spec.loader.exec_module(_s_mod)
 BarData = _p_mod.BarData
 PortfolioState = _p_mod.PortfolioState
 
-from exchange.order_manager import Signal as LiveSignal
-from exchange.types import Candle, AccountState, PositionSide
-from config import get_settings
-from monitoring.logger import get_logger
+from ..exchange.order_manager import Signal as LiveSignal
+from ..exchange.types import Candle, AccountState, PositionSide
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -77,7 +77,7 @@ class LiveStrategyAdapter:
         try:
             backtest_signals = self._strategy.on_bar(bar_data, portfolio)
         except Exception as e:
-            logger.error(f"Strategy error", extra={"error": str(e)})
+            logger.error("Strategy error", extra={"error": str(e)})
             return []
 
         return [

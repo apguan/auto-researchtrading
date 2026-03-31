@@ -11,8 +11,8 @@ if str(_REPO_ROOT) not in sys.path:
 from constants import PARAM_COLUMNS
 
 from .models import Trade, Position, SignalRecord, RiskEvent, ParamSnapshot
-from config import get_settings
-from monitoring.logger import get_logger
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 

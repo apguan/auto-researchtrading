@@ -23,7 +23,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
-from constants import HYPERLIQUID_API_URL as MAINNET_URL  # noqa: E402
 
 from .types import (
     Order,
@@ -35,8 +34,8 @@ from .types import (
     AccountState,
     Candle,
 )
-from monitoring.logger import get_logger
-from config import get_settings
+from ..monitoring.logger import get_logger
+from ..config import get_settings
 
 logger = get_logger(__name__)
 
