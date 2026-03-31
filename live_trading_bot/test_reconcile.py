@@ -12,16 +12,14 @@ import logging
 
 logging.basicConfig(level=logging.WARNING)
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 os.environ["BAR_INTERVAL"] = "1h"
 os.environ["DRY_RUN"] = "true"
 
 import numpy as np
-import pandas as pd
-from exchange.types import Candle, AccountState, Position, PositionSide
-from adapter.adapter import LiveStrategyAdapter
+from live_trading_bot.exchange.types import Candle, AccountState, Position, PositionSide
+from live_trading_bot.adapter.adapter import LiveStrategyAdapter
 
 
 def make_candles(symbol, base_price, n_bars=100):
@@ -282,4 +280,4 @@ if __name__ == "__main__":
     test_desync_with_cooldown_cleared()
     test_no_position_no_op()
     test_short_position_restored()
-    print(f"\nAll 5 tests passed.")
+    print("\nAll 5 tests passed.")

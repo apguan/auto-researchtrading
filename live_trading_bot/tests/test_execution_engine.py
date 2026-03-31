@@ -1,17 +1,14 @@
 import pytest
-import time
 from unittest.mock import AsyncMock, MagicMock
-from execution.signal_state import SignalState
-from execution.execution_engine import ExecutionEngine
-from exchange.types import (
+from live_trading_bot.execution.signal_state import SignalState
+from live_trading_bot.execution.execution_engine import ExecutionEngine
+from live_trading_bot.exchange.types import (
     Order,
     OrderSide,
     OrderType,
     OrderStatus,
-    Position,
-    PositionSide,
 )
-from config.settings import Settings
+from live_trading_bot.config.settings import Settings
 
 
 def _make_filled_order(symbol="BTC", side=OrderSide.BUY, size=0.1, price=50000.0):

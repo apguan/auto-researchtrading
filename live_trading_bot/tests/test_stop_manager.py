@@ -1,9 +1,16 @@
 import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock
-from exchange.stop_manager import StopManager
-from exchange.types import Order, OrderSide, OrderType, OrderStatus, Position, PositionSide
-from config.settings import Settings
+from live_trading_bot.exchange.stop_manager import StopManager
+from live_trading_bot.exchange.types import (
+    Order,
+    OrderSide,
+    OrderType,
+    OrderStatus,
+    Position,
+    PositionSide,
+)
+from live_trading_bot.config.settings import Settings
 
 
 @pytest.fixture
@@ -35,7 +42,7 @@ class TestStopManager:
     @pytest.mark.asyncio
     async def test_place_stop_calls_trigger_order(self, settings, mock_client):
         sm = StopManager(mock_client, settings)
-        order = await sm.place_stop("BTC", OrderSide.SELL, 0.1, 49000.0)
+        await sm.place_stop("BTC", OrderSide.SELL, 0.1, 49000.0)
         assert mock_client.place_trigger_order.called
         assert sm.get_stop("BTC") is not None
 
@@ -170,8 +177,11 @@ class TestLoadExistingStops:
 
         # refresh_stops with a position whose calculated stop is close to 49000
         pos = Position(
-            symbol="BTC", side=PositionSide.LONG, size=0.1,
-            entry_price=50000.0, current_price=50000.0,
+            symbol="BTC",
+            side=PositionSide.LONG,
+            size=0.1,
+            entry_price=50000.0,
+            current_price=50000.0,
             unrealized_pnl=0.0,
         )
         # ATR=100, mult=8.0, widening=1.5 → distance=1200 → stop=48800
