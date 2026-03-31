@@ -21,4 +21,3 @@ logs/
 .env
 .env.local
 live_trading_bot/backtest_data/
-live_trading_bot/data/
