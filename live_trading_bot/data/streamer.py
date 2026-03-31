@@ -1,14 +1,13 @@
 import asyncio
 import json
-from datetime import datetime, timezone
 from typing import Dict, List, Optional, Callable
 import websockets
 
-from exchange.types import Candle
-from exchange.interface import Exchange
-from data.bar_builder import BarBuilder
-from config import get_settings
-from monitoring.logger import get_logger
+from ..exchange.types import Candle
+from ..exchange.interface import Exchange
+from ..data.bar_builder import BarBuilder
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -72,7 +71,7 @@ class DataStreamer:
             try:
                 await self._connect_and_listen()
             except Exception as e:
-                logger.error(f"WebSocket error", extra={"error": str(e)})
+                logger.error("WebSocket error", extra={"error": str(e)})
                 if self._running:
                     logger.info(f"Reconnecting in {self._reconnect_delay}s...")
                     await asyncio.sleep(self._reconnect_delay)
@@ -97,17 +96,17 @@ class DataStreamer:
                     self.latest_prices[symbol] = candles[-1].close
 
                 logger.info(
-                    f"Loaded historical data",
+                    "Loaded historical data",
                     extra={"symbol": symbol, "bars": len(candles)},
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to load historical data",
+                    "Failed to load historical data",
                     extra={"symbol": symbol, "error": str(e)},
                 )
 
     async def _connect_and_listen(self):
-        logger.info(f"Connecting to WebSocket", extra={"url": self.ws_url})
+        logger.info("Connecting to WebSocket", extra={"url": self.ws_url})
 
         async with websockets.connect(
             self.ws_url,
@@ -129,9 +128,9 @@ class DataStreamer:
                     data = json.loads(message)
                     await self._handle_message(data)
                 except json.JSONDecodeError as e:
-                    logger.error(f"JSON decode error", extra={"error": str(e)})
+                    logger.error("JSON decode error", extra={"error": str(e)})
                 except Exception as e:
-                    logger.error(f"Message handling error", extra={"error": str(e)})
+                    logger.error("Message handling error", extra={"error": str(e)})
 
     async def _subscribe(self):
         assert self._ws is not None
@@ -236,7 +235,7 @@ class DataStreamer:
                 )
             except Exception as e:
                 logger.warning(
-                    f"Failed to fetch funding rate",
+                    "Failed to fetch funding rate",
                     extra={"symbol": symbol, "error": str(e)},
                 )
 
@@ -279,7 +278,7 @@ class DataStreamer:
             else:
                 callback(*args)
         except Exception as e:
-            logger.error(f"Callback error", extra={"error": str(e)})
+            logger.error("Callback error", extra={"error": str(e)})
 
     async def stop(self):
         self._running = False

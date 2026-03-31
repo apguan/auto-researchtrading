@@ -3,13 +3,13 @@ from datetime import datetime, timezone
 from typing import Optional
 import httpx
 
-from config import (
+from ..config import (
     get_settings,
     get_telegram_token,
     get_telegram_chat_id,
     get_discord_webhook,
 )
-from monitoring.logger import get_logger
+from .logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -48,7 +48,7 @@ class Alerter:
             logger.debug("Telegram alert sent")
             return True
         except Exception as e:
-            logger.error(f"Failed to send Telegram alert", extra={"error": str(e)})
+            logger.error("Failed to send Telegram alert", extra={"error": str(e)})
             return False
 
     async def send_discord(self, message: str) -> bool:
@@ -64,7 +64,7 @@ class Alerter:
             logger.debug("Discord alert sent")
             return True
         except Exception as e:
-            logger.error(f"Failed to send Discord alert", extra={"error": str(e)})
+            logger.error("Failed to send Discord alert", extra={"error": str(e)})
             return False
 
     def _tag_message(self, message: str) -> str:
