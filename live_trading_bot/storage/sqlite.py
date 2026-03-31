@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .models import Trade, SignalRecord, RiskEvent
-from monitoring.logger import get_logger
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 

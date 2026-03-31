@@ -12,6 +12,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import cast
 import numpy as np
 import pandas as pd
 
@@ -25,7 +26,7 @@ sys.path = [p for p in sys.path if Path(p).resolve() != _repo_root]
 sys.path.append(str(_repo_root))
 import requests
 
-from prepare import BarData, Signal, PortfolioState
+from prepare import BarData, PortfolioState
 
 from constants import TAKER_FEE, SLIPPAGE_BPS
 from constants import BACKTEST_CAPITAL as INITIAL_CAPITAL
@@ -80,7 +81,7 @@ class _RingBuffer:
 
     def __init__(self, capacity: int):
         self.capacity = capacity
-        self._arrays = {
+        self._arrays: dict[str, np.ndarray] = {
             col: np.empty(capacity, dtype=np.float64) for col in _HISTORY_COLUMNS
         }
         self._arrays["timestamp"] = np.empty(capacity, dtype=np.int64)
@@ -346,7 +347,7 @@ def run_backtest_1m(strategy, data: dict, interval: str = "1m") -> dict:
                 close=row["close"],
                 volume=row["volume"],
                 funding_rate=row.get("funding_rate", 0.0),
-                history=hist_view,
+                history=cast(pd.DataFrame, hist_view),
             )
 
         if not bar_data:
@@ -675,7 +676,7 @@ def main():
 
     if result["trade_log"]:
         closes = [t for t in result["trade_log"] if t[0] == "close"]
-        print(f"\n  Trade summary:")
+        print("\n  Trade summary:")
         print(f"    opens:  {len([t for t in result['trade_log'] if t[0] == 'open'])}")
         print(f"    closes: {len(closes)}")
         if closes:
@@ -686,7 +687,7 @@ def main():
             print(f"    worst PnL: ${min(pnls):,.2f}")
 
     if result["trade_log"]:
-        print(f"\n  Last 10 trades:")
+        print("\n  Last 10 trades:")
         for t in result["trade_log"][-10:]:
             action, symbol, delta, price, pnl = t
             pnl_str = f"${pnl:,.2f}" if action == "close" else ""
@@ -697,7 +698,7 @@ def main():
     eq = result["equity_curve"]
     if len(eq) > 1:
         n = len(eq)
-        print(f"\n  Equity curve (sampled):")
+        print("\n  Equity curve (sampled):")
         for pct in [0, 25, 50, 75, 100]:
             idx = min(int(n * pct / 100), n - 1)
             print(f"    {pct:3d}%: ${eq[idx]:>12,.2f}")

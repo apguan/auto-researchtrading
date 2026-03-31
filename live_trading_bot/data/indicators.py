@@ -1,8 +1,7 @@
 import numpy as np
-from typing import Dict, List, Optional
-import pandas as pd
+from typing import Optional
 
-from config import get_settings
+from ..config import get_settings
 
 
 class Indicators:

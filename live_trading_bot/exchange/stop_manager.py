@@ -1,8 +1,8 @@
 from typing import Dict, Optional, Set
-from exchange.types import Order, OrderSide, OrderStatus, OrderType, Position
-from exchange.interface import Exchange
-from config.settings import Settings
-from monitoring.logger import get_logger
+from .types import Order, OrderSide, OrderStatus, OrderType, Position
+from .interface import Exchange
+from ..config.settings import Settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 

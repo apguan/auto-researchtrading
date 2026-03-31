@@ -3,9 +3,9 @@ import os
 import tempfile
 import time
 from unittest.mock import AsyncMock
-from monitoring.watchdog import Watchdog
-from config.settings import Settings
-from exchange.types import Order, OrderSide, OrderType, OrderStatus
+from live_trading_bot.monitoring.watchdog import Watchdog
+from live_trading_bot.config.settings import Settings
+from live_trading_bot.exchange.types import Order, OrderSide, OrderType, OrderStatus
 
 
 @pytest.fixture

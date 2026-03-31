@@ -1,10 +1,10 @@
 from typing import Dict, Optional
 from dataclasses import dataclass
 
-from exchange.order_manager import Signal
-from exchange.types import AccountState
-from config import get_settings
-from monitoring.logger import get_logger
+from ..exchange.order_manager import Signal
+from ..exchange.types import AccountState
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -36,7 +36,6 @@ class PositionLimiter:
         max_position_value = equity * self.settings.MAX_POSITION_PCT
 
         symbol = signal.symbol
-        current_pos = current_positions.get(symbol, 0)
         target_pos = signal.target_position
 
         new_exposure = abs(target_pos)
@@ -45,7 +44,7 @@ class PositionLimiter:
             adjusted_size = max_position_value * (1 if target_pos > 0 else -1)
 
             logger.info(
-                f"Position size limited",
+                "Position size limited",
                 extra={
                     "symbol": symbol,
                     "original_target": target_pos,
@@ -101,7 +100,7 @@ class PositionLimiter:
 
             if not pos_limit.allowed:
                 logger.warning(
-                    f"Signal rejected - position limit",
+                    "Signal rejected - position limit",
                     extra={"symbol": signal.symbol, "reason": pos_limit.reason},
                 )
                 continue
@@ -117,7 +116,7 @@ class PositionLimiter:
 
             if not exposure_limit.allowed:
                 logger.warning(
-                    f"Signal rejected - total exposure",
+                    "Signal rejected - total exposure",
                     extra={"symbol": signal.symbol, "reason": exposure_limit.reason},
                 )
                 continue

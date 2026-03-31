@@ -23,24 +23,24 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
-from config import get_settings
-from config.settings import Settings
-from exchange import create_exchange, Exchange
-from exchange.order_manager import OrderManager
-from exchange.types import AccountState, Candle, PositionSide
-from data.streamer import DataStreamer
-from adapter.ensemble import EnsembleStrategy
-from risk.risk_controller import RiskController
-from risk.position_limiter import PositionLimiter
-from storage import create_repository, Repository
-from storage.models import Trade, Position, SignalRecord
-from monitoring.logger import setup_logger, get_logger
-from monitoring.alerts import Alerter
-from monitoring.metrics import MetricsTracker
-from execution.signal_state import SignalState
-from execution.execution_engine import ExecutionEngine
-from exchange.stop_manager import StopManager
-from monitoring.watchdog import Watchdog
+from live_trading_bot.config import get_settings
+from live_trading_bot.config.settings import Settings
+from live_trading_bot.exchange import create_exchange, Exchange
+from live_trading_bot.exchange.order_manager import OrderManager
+from live_trading_bot.exchange.types import AccountState, Candle
+from live_trading_bot.data.streamer import DataStreamer
+from live_trading_bot.adapter.ensemble import EnsembleStrategy
+from live_trading_bot.risk.risk_controller import RiskController
+from live_trading_bot.risk.position_limiter import PositionLimiter
+from live_trading_bot.storage import create_repository, Repository
+from live_trading_bot.storage.models import Trade, SignalRecord
+from live_trading_bot.monitoring.logger import setup_logger, get_logger
+from live_trading_bot.monitoring.alerts import Alerter
+from live_trading_bot.monitoring.metrics import MetricsTracker
+from live_trading_bot.execution.signal_state import SignalState
+from live_trading_bot.execution.execution_engine import ExecutionEngine
+from live_trading_bot.exchange.stop_manager import StopManager
+from live_trading_bot.monitoring.watchdog import Watchdog
 
 
 logger = get_logger(__name__)
@@ -342,15 +342,15 @@ class TradingBot:
             },
         )
 
-        for signal in signals:
+        for sig in signals:
             await self.db.insert_signal(
                 SignalRecord(
                     id=None,
                     timestamp=datetime.now(timezone.utc),
-                    symbol=signal.symbol,
+                    symbol=sig.symbol,
                     signal_type="target_position",
-                    target_position=signal.target_position,
-                    current_position=positions_usd.get(signal.symbol, 0),
+                    target_position=sig.target_position,
+                    current_position=positions_usd.get(sig.symbol, 0),
                     executed=False,
                 )
             )
@@ -447,51 +447,48 @@ class TradingBot:
                 prices=self._current_prices,
             )
 
-            signal_by_symbol = {s.symbol: s for s in limited_signals}
-
             for order in orders:
-                if order.status.value in ("filled", "partially_filled"):
-                    pnl = None
-                    current_pos = positions_usd.get(order.symbol, 0)
+                pnl = None
+                current_pos = positions_usd.get(order.symbol, 0)
 
-                    if current_pos > 0 and order.side.value == "sell":
-                        entry = account_state.positions.get(order.symbol)
-                        entry_px = entry.entry_price if entry else order.avg_fill_price
-                        pnl = (order.avg_fill_price - entry_px) * order.filled_size
-                    elif current_pos < 0 and order.side.value == "buy":
-                        entry = account_state.positions.get(order.symbol)
-                        entry_px = entry.entry_price if entry else order.avg_fill_price
-                        pnl = (entry_px - order.avg_fill_price) * order.filled_size
+                if current_pos > 0 and order.side.value == "sell":
+                    entry = account_state.positions.get(order.symbol)
+                    entry_px = entry.entry_price if entry else order.avg_fill_price
+                    pnl = (order.avg_fill_price - entry_px) * order.filled_size
+                elif current_pos < 0 and order.side.value == "buy":
+                    entry = account_state.positions.get(order.symbol)
+                    entry_px = entry.entry_price if entry else order.avg_fill_price
+                    pnl = (entry_px - order.avg_fill_price) * order.filled_size
 
-                    await self.db.insert_trade(
-                        Trade(
-                            id=None,
-                            timestamp=datetime.now(timezone.utc),
-                            symbol=order.symbol,
-                            side=order.side.value,
-                            size=order.filled_size,
-                            price=order.avg_fill_price,
-                            fee=order.filled_size * 0.0005,
-                            pnl=pnl,
-                            order_id=order.id,
-                        )
-                    )
-
-                    self.metrics.record_trade(
+                await self.db.insert_trade(
+                    Trade(
+                        id=None,
+                        timestamp=datetime.now(timezone.utc),
                         symbol=order.symbol,
                         side=order.side.value,
                         size=order.filled_size,
                         price=order.avg_fill_price,
+                        fee=order.filled_size * 0.0005,
                         pnl=pnl,
+                        order_id=order.id,
                     )
+                )
 
-                    await self.alerter.alert_trade(
-                        symbol=order.symbol,
-                        side=order.side.value,
-                        size=order.filled_size,
-                        price=order.avg_fill_price,
-                        pnl=pnl,
-                    )
+                self.metrics.record_trade(
+                    symbol=order.symbol,
+                    side=order.side.value,
+                    size=order.filled_size,
+                    price=order.avg_fill_price,
+                    pnl=pnl,
+                )
+
+                await self.alerter.alert_trade(
+                    symbol=order.symbol,
+                    side=order.side.value,
+                    size=order.filled_size,
+                    price=order.avg_fill_price,
+                    pnl=pnl,
+                )
 
         account_state = await self.client.get_account_state()
 
@@ -560,7 +557,7 @@ class TradingBot:
         except asyncio.CancelledError:
             logger.info("Bot cancelled")
         except Exception as e:
-            logger.critical(f"Bot crashed", extra={"error": str(e)})
+            logger.critical("Bot crashed", extra={"error": str(e)})
             await self.alerter.alert_error(f"Bot crashed: {str(e)}")
             raise
         finally:
@@ -615,9 +612,10 @@ async def main():
 
         if args.close_all:
             logger.info("--close-all: closing all positions and cancelling all orders")
+            assert bot.client is not None
             await bot.client.cancel_all_orders()
             account_state = await bot.client.get_account_state()
-            from exchange.types import OrderSide, OrderType
+            from live_trading_bot.exchange.types import OrderSide, OrderType
 
             for sym, pos in account_state.positions.items():
                 side = OrderSide.SELL if pos.side.value == "long" else OrderSide.BUY

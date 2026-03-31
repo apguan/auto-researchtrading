@@ -41,7 +41,6 @@ def export_equity_for_commit(commit, label, desc):
     # Run backtest with this strategy
     try:
         # Re-import with fresh module
-        import importlib
         if 'strategy' in sys.modules:
             del sys.modules['strategy']
         from prepare import load_data, run_backtest

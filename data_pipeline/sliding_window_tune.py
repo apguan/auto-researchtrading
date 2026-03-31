@@ -19,9 +19,9 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import cast
 from dotenv import load_dotenv
 
-import common
 from common import (
     setup_logging,
     download_15m_data,
@@ -366,7 +366,7 @@ def main():
                 if best:
                     tag = f"SW_{wr['window_date']}_{best.get('sweep_name', '')}"
                     snapshots.append((best, wr.get("period", ""), tag))
-            n = save_snapshots_to_db(snapshots)
+            n = save_snapshots_to_db(cast(dict, snapshots))
             logger.info("Saved %d snapshot(s) to database", n)
         else:
             logger.info("Database save skipped (--no-db)")

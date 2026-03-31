@@ -8,7 +8,7 @@ def create_repository() -> Repository:
     If SUPABASE_DB_URL is configured, uses Supabase (asyncpg).
     Otherwise, falls back to local SQLite using DB_PATH.
     """
-    from config import get_settings
+    from ..config import get_settings
 
     settings = get_settings()
 
