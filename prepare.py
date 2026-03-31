@@ -239,8 +239,8 @@ def download_data(symbols=None):
     if symbols is None:
         symbols = SYMBOLS
 
-    start_ms = int(pd.Timestamp(TRAIN_START, tz="UTC").asm8.item() / 1_000_000)
-    end_ms = int(pd.Timestamp(TEST_END, tz="UTC").asm8.item() / 1_000_000)
+    start_ms = pd.Timestamp(TRAIN_START, tz="UTC").value // 1_000_000
+    end_ms = pd.Timestamp(TEST_END, tz="UTC").value // 1_000_000
 
     for symbol in symbols:
         filepath = os.path.join(DATA_DIR, f"{symbol}_1h.parquet")
@@ -296,8 +296,8 @@ def load_data(split: str = "val") -> dict:
     }
     assert split in splits, f"split must be one of {list(splits.keys())}"
     start_str, end_str = splits[split]
-    start_ms = int(pd.Timestamp(start_str, tz="UTC").asm8.item() / 1_000_000)
-    end_ms = int(pd.Timestamp(end_str, tz="UTC").asm8.item() / 1_000_000)
+    start_ms = pd.Timestamp(start_str, tz="UTC").value // 1_000_000
+    end_ms = pd.Timestamp(end_str, tz="UTC").value // 1_000_000
 
     result = {}
     for symbol in SYMBOLS:
