@@ -1,0 +1,15 @@
+# Daily Tune — cron service for parameter optimization
+# Railway: create a "Cron Service" pointing to this repo
+# 
+# This file is for REFERENCE. To use it:
+#   Option A: Rename to railway.toml and set this service's root to /
+#   Option B: Set these values directly in the Railway dashboard for the cron service
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uv run data_pipeline/daily_tune.py --workers 4 --subsample 4"
+cronSchedule = "0 6 * * *"   # 6 AM UTC daily
+restartPolicyType = "never"
