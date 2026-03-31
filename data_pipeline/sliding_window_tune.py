@@ -21,7 +21,6 @@ from datetime import datetime, timezone, timedelta
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dotenv import load_dotenv
 
-import common
 from common import (
     setup_logging,
     download_15m_data,
