@@ -64,12 +64,15 @@ async def query_pnl(window: str = "today"):
 
     await client.close()
 
-    # Realized PnL by symbol
+    # Realized PnL by symbol (closedPnl minus fees)
     realized_by_symbol = defaultdict(float)
+    fees_by_symbol = defaultdict(float)
     for fill in fills:
         coin = fill.get("coin", "?")
         closed_pnl = float(fill.get("closedPnl", 0))
-        realized_by_symbol[coin] += closed_pnl
+        fee = float(fill.get("fee", 0))
+        realized_by_symbol[coin] += closed_pnl - fee
+        fees_by_symbol[coin] += fee
 
     # Funding PnL by symbol
     funding_by_symbol = defaultdict(float)
@@ -101,17 +104,20 @@ async def query_pnl(window: str = "today"):
     print(f"  Equity: ${account.total_equity:.2f}")
     print(f"{'=' * 55}")
 
+    total_fees = sum(fees_by_symbol.values())
+
     if all_symbols:
-        print(f"\n  {'Symbol':<8} {'Realized':>10} {'Funding':>10} {'Unrealized':>10}")
-        print(f"  {'-' * 8} {'-' * 10} {'-' * 10} {'-' * 10}")
+        print(f"\n  {'Symbol':<8} {'Realized':>10} {'Fees':>10} {'Funding':>10} {'Unrealized':>10}")
+        print(f"  {'-' * 8} {'-' * 10} {'-' * 10} {'-' * 10} {'-' * 10}")
         for sym in all_symbols:
             r = realized_by_symbol.get(sym, 0)
-            f = funding_by_symbol.get(sym, 0)
+            fe = fees_by_symbol.get(sym, 0)
+            fu = funding_by_symbol.get(sym, 0)
             u = unrealized_by_symbol.get(sym, 0)
-            print(f"  {sym:<8} {r:>+10.2f} {f:>+10.2f} {u:>+10.2f}")
+            print(f"  {sym:<8} {r:>+10.2f} {fe:>10.2f} {fu:>+10.2f} {u:>+10.2f}")
 
     print(
-        f"\n  {'TOTAL':<8} {total_realized:>+10.2f} {total_funding:>+10.2f} {total_unrealized:>+10.2f}"
+        f"\n  {'TOTAL':<8} {total_realized:>+10.2f} {total_fees:>10.2f} {total_funding:>+10.2f} {total_unrealized:>+10.2f}"
     )
     print(f"\n  Net PnL: ${total:+.2f}")
     print(f"  Fills: {len(fills)} | Funding events: {len(funding)}")
