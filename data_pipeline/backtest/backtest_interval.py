@@ -155,7 +155,10 @@ def download_candles(
             data = resp.json()
 
             if not data:
-                break
+                # No data in this chunk — advance to next chunk rather than
+                # giving up entirely (data may exist in later ranges).
+                current = chunk_end + 1
+                continue
 
             for row in data:
                 all_rows.append(
