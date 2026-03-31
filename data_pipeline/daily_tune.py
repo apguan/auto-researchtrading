@@ -17,7 +17,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
-import common
 from common import (
     PIPELINE_ROOT,
     RESULTS_DIR,
