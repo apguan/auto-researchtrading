@@ -16,9 +16,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import requests
-import pyarrow.parquet as pq
 
-from constants import INITIAL_CAPITAL, MAKER_FEE, TAKER_FEE, SLIPPAGE_BPS
+from constants import INITIAL_CAPITAL, TAKER_FEE, SLIPPAGE_BPS
 from constants import BENCHMARK_SYMBOLS, HL_INFO_URL
 
 # ---------------------------------------------------------------------------
