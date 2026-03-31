@@ -194,7 +194,10 @@ class Alerter:
         if positions:
             pos_lines = []
             for symbol, pos in positions.items():
-                pos_lines.append(f"  {symbol}: ${abs(pos.get('size', 0)):.2f}")
+                notional = pos.get("notional", 0)
+                size = pos.get("size", 0)
+                direction = "L" if size > 0 else "S" if size < 0 else "—"
+                pos_lines.append(f"  {symbol}: ${notional:.2f} ({direction})")
             pos_str = "\n" + "\n".join(pos_lines)
 
         message = (
