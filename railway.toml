@@ -1,0 +1,11 @@
+# Trading Bot — long-running WebSocket service
+# Railway: create a "Web Service" pointing to this repo
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uv run live_trading_bot/bot.py"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
