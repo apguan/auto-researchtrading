@@ -9,15 +9,22 @@ What these tests tell us:
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from exchange.dry_exchange import DryExchange, _SimPosition
-from exchange.types import OrderSide, OrderType, OrderStatus, PositionSide
+from live_trading_bot.exchange.dry_exchange import DryExchange
+from live_trading_bot.exchange.types import (
+    OrderSide,
+    OrderType,
+    OrderStatus,
+    PositionSide,
+)
 
 
 @pytest.fixture
 def exchange():
     """Create a DryExchange with mocked Info API (no real network calls)."""
-    with patch("exchange.dry_exchange.Info"):
-        with patch("exchange.dry_exchange.get_settings") as mock_settings:
+    with patch("live_trading_bot.exchange.dry_exchange.Info"):
+        with patch(
+            "live_trading_bot.exchange.dry_exchange.get_settings"
+        ) as mock_settings:
             settings = mock_settings.return_value
             settings.HYPERLIQUID_API_URL = "https://api.hyperliquid.xyz"
             settings.HYPERLIQUID_MAIN_WALLET = None
@@ -25,9 +32,7 @@ def exchange():
             settings.MAX_LEVERAGE = 5.0
 
             # Use a valid 32-byte hex key for Account.from_key
-            ex = DryExchange(
-                private_key="0x" + "ab" * 32
-            )
+            ex = DryExchange(private_key="0x" + "ab" * 32)
             return ex
 
 
@@ -110,9 +115,7 @@ class TestPlaceOrder:
     async def test_market_order_fills_and_tracks(self, exchange):
         exchange.get_mid_price = AsyncMock(return_value=50000.0)
 
-        order = await exchange.place_order(
-            "BTC", OrderSide.BUY, 0.1, OrderType.MARKET
-        )
+        order = await exchange.place_order("BTC", OrderSide.BUY, 0.1, OrderType.MARKET)
 
         assert order.status == OrderStatus.FILLED
         assert order.filled_size == 0.1
@@ -144,9 +147,7 @@ class TestAccountState:
     @pytest.mark.asyncio
     async def test_equity_includes_unrealized_pnl(self, exchange):
         exchange._apply_fill("BTC", OrderSide.BUY, 0.1, 50000.0, False)
-        exchange.get_all_mid_prices = AsyncMock(
-            return_value={"BTC": 52000.0}
-        )
+        exchange.get_all_mid_prices = AsyncMock(return_value={"BTC": 52000.0})
 
         state = await exchange.get_account_state()
 
