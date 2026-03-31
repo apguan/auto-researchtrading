@@ -5,6 +5,9 @@ Runs daily_tune-style optimisation for each day over the past N days.
 Downloads 15m candle data once (enough for all windows), slices into daily
 windows, and runs full optimisation in parallel across workers.
 
+Results are saved to JSON and the database as inactive snapshots (backtest
+reference only — they will not become active parameters).
+
 Usage:
     python sliding_window_tune.py
     python sliding_window_tune.py --workers 4
@@ -19,12 +22,10 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import cast
 from dotenv import load_dotenv
 
 from common import (
     setup_logging,
-    download_15m_data,
     compute_period,
     find_best_result,
     save_snapshots_to_db,
@@ -34,8 +35,8 @@ from common import (
 
 logger = logging.getLogger("sliding_window_tune")  # noqa: F821
 
-WINDOW_DAYS = 14
-HOURS_BACK = 1300
+WINDOW_DAYS = 30
+HOURS_BACK = 1080
 MAX_WORKERS = 8
 INTERVAL = "15m"
 
@@ -57,15 +58,47 @@ def _run_window_worker(args: tuple) -> dict:
     """Subprocess worker: run optimisation for one window."""
     window_date_str, sliced_data, window_idx, subsample_factor = args
 
+    # Per-worker file logger for diagnostics
+    _worker_log_path = os.path.join(
+        os.path.dirname(__file__), "logs", f"worker_{window_date_str}.log"
+    )
+    os.makedirs(os.path.dirname(_worker_log_path), exist_ok=True)
+    _wlog = logging.getLogger(f"swt.worker.{window_date_str}")
+    _wlog.setLevel(logging.DEBUG)
+    _wlog.handlers.clear()
+    _wlog.propagate = False
+    _fh = logging.FileHandler(_worker_log_path, mode="w")
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    _wlog.addHandler(_fh)
+
+    _wlog.info(
+        "Worker START window=%s idx=%d bars=%d subsample=%d",
+        window_date_str,
+        window_idx,
+        sum(len(df) for df in sliced_data.values()),
+        subsample_factor,
+    )
+
     old_stdout = sys.stdout
-    sys.stdout = open(os.devnull, "w")
+    _stdout_path = os.path.join(
+        os.path.dirname(__file__), "logs", f"worker_{window_date_str}_stdout.log"
+    )
+    _stdout_file = open(_stdout_path, "w")
+    sys.stdout = _stdout_file
     try:
+        _wlog.info("Calling run_optimization_pipeline...")
+        t_entry = time.time()
         _, all_results, _ = run_optimization_pipeline(
             sliced_data,
             n_workers=1,  # parallelism is at window level, not within
             subsample=subsample_factor,
             skip_oos=True,
-            logger=None,
+            logger=_wlog,
+        )
+        _wlog.info(
+            "Pipeline returned %d results in %.1fs",
+            len(all_results),
+            time.time() - t_entry,
         )
 
         for r in all_results:
@@ -77,6 +110,8 @@ def _run_window_worker(args: tuple) -> dict:
         best = find_best_result(all_results)
         period = compute_period(sliced_data)
 
+        _wlog.info("Worker DONE best_score=%.2f", best.get("_score", 0) if best else 0)
+
         return {
             "window_date": window_date_str,
             "window_idx": window_idx,
@@ -87,18 +122,22 @@ def _run_window_worker(args: tuple) -> dict:
             "period": period,
         }
     except Exception as exc:
+        _wlog.exception("Worker FAILED: %s", exc)
         return {
             "window_date": window_date_str,
             "window_idx": window_idx,
             "num_results": 0,
-            "total_bars": 0,
+            "total_bars": sum(len(df) for df in sliced_data.values()),
             "results": [],
             "best": None,
             "error": str(exc),
         }
     finally:
-        sys.stdout.close()
         sys.stdout = old_stdout
+        _stdout_file.close()
+        for h in _wlog.handlers[:]:
+            h.close()
+            _wlog.removeHandler(h)
 
 
 def save_results_json(all_window_results: list[dict]) -> None:
@@ -240,15 +279,15 @@ def main():
         help=f"Lookback hours per window (default: {HOURS_BACK})",
     )
     parser.add_argument(
-        "--no-db", action="store_true", help="Skip database save (JSON only)"
-    )
-    parser.add_argument(
         "--subsample", type=int, default=1, help="Take every Nth bar (default=1)"
     )
     args = parser.parse_args()
 
     t_start = time.time()
-    load_dotenv()
+    _env_path = os.path.join(
+        os.path.dirname(__file__), os.pardir, "live_trading_bot", ".env"
+    )
+    load_dotenv(_env_path)
     setup_logging("sliding_window_tune", "sliding_window_tune")
 
     logger.info("=" * 70)
@@ -265,21 +304,24 @@ def main():
     )
 
     try:
+        from backtest.backtest_interval import download_all_data
+
         total_hours = args.days * 24 + args.lookback
-        logger.info("Step 1/4: Downloading data (%d hours back)...", total_hours)
+
+        logger.info("Step 1/4: Downloading fresh data (%d hours back)...", total_hours)
         t0 = time.time()
-        full_data = download_15m_data(
-            hours_back=total_hours, interval=INTERVAL, logger=logger
-        )
+        full_data = download_all_data(hours_back=total_hours, interval=INTERVAL)
         if not full_data:
-            logger.error("No data available — aborting")
+            logger.error("No data available after download — aborting")
             sys.exit(1)
 
         total_bars = sum(len(df) for df in full_data.values())
+        symbols = list(full_data.keys())
         logger.info(
-            "Data ready: %d bars across %d symbols (%.1fs)",
+            "Data ready: %d bars across %d symbols %s (%.1fs)",
             total_bars,
             len(full_data),
+            symbols,
             time.time() - t0,
         )
 
@@ -333,6 +375,31 @@ def main():
                         result["num_results"],
                         best_score,
                     )
+
+                    # Incremental save: record each window to DB immediately
+                    best = result.get("best")
+                    if best:
+                        snap = {
+                            "symbol": "PORTFOLIO",
+                            "params": best.get("params", {}),
+                            "score": best.get("_score", 0),
+                            "sweep_name": f"sliding_window_{window_date}",
+                            "period": result.get("period", ""),
+                            "sharpe": best.get("sharpe", 0),
+                            "total_return_pct": best.get("total_return_pct", 0),
+                            "max_drawdown_pct": best.get("max_drawdown_pct", 0),
+                            "profit_factor": best.get("profit_factor", 0),
+                            "win_rate_pct": best.get("win_rate_pct", 0),
+                            "num_trades": best.get("num_trades", 0),
+                            "ret_dd_ratio": best.get("_ret_dd", 0),
+                        }
+                        n = save_snapshots_to_db([snap], is_active=False)
+                        if n > 0:
+                            logger.info(
+                                "    -> saved to DB (inactive), score=%.2f",
+                                best.get("_score", 0),
+                            )
+
                 except Exception as exc:
                     logger.error(
                         "  Window %s (idx=%d) FAILED: %s", window_date, window_idx, exc
@@ -356,20 +423,14 @@ def main():
             time.time() - t0,
         )
 
-        logger.info("Step 4/4: Saving results...")
+        logger.info("Step 4/4: Saving final JSON summary...")
         save_results_json(all_window_results)
 
-        if not args.no_db:
-            snapshots = []
-            for wr in all_window_results:
-                best = wr.get("best")
-                if best:
-                    tag = f"SW_{wr['window_date']}_{best.get('sweep_name', '')}"
-                    snapshots.append((best, wr.get("period", ""), tag))
-            n = save_snapshots_to_db(cast(dict, snapshots))
-            logger.info("Saved %d snapshot(s) to database", n)
-        else:
-            logger.info("Database save skipped (--no-db)")
+        db_count = sum(1 for wr in all_window_results if wr.get("best"))
+        logger.info(
+            "Saved %d windows to DB (incremental), JSON summary written",
+            db_count,
+        )
 
         print_summary(all_window_results, time.time() - t_start)
 
