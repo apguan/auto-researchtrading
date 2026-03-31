@@ -24,8 +24,8 @@ from .types import (
     PositionSide,
 )
 from .hyperliquid import fetch_candles_paginated
-from config import get_settings
-from monitoring.logger import get_logger
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,9 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 import math
 
-from monitoring.logger import get_logger
+from .logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -65,7 +65,7 @@ class MetricsTracker:
         )
         self.trades.append(trade)
         logger.debug(
-            f"Recorded trade",
+            "Recorded trade",
             extra={
                 "symbol": symbol,
                 "side": side,

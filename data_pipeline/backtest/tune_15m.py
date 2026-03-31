@@ -35,16 +35,11 @@ import pandas as pd
 _this_dir = Path(__file__).resolve().parent
 _pipeline_root = _this_dir.parent
 _repo_root = _pipeline_root.parent
-_live_bot_root = _repo_root / "live_trading_bot"
-for _p in (_this_dir, _pipeline_root, _live_bot_root):
-    sp = str(_p)
-    if sp not in sys.path:
-        sys.path.insert(0, sp)
-sys.path = [p for p in sys.path if Path(p).resolve() != _repo_root]
-sys.path.append(str(_repo_root))
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
-from backtest_interval import run_backtest_1m, load_data
-import strategies.strategy_15m as s15m
+from . import backtest_interval
+from live_trading_bot.strategies import strategy_15m as s15m
 
 BARS_PER_YEAR_15M = 4 * 24 * 365  # 35040
 
@@ -417,7 +412,7 @@ def run_once(
         clear_symbol_params=not preserve_symbol_params,
     )
     strategy = s15m.Strategy()
-    result = run_backtest_1m(strategy, data, "15m")
+    result = backtest_interval.run_backtest_1m(strategy, data, "15m")
     if "error" in result:
         return result
     result["params"] = dict(overrides)
@@ -436,7 +431,7 @@ def _sweep_worker(args: tuple) -> dict:
     data, overrides, subsample_factor = args
     set_params(overrides, subsample_factor=subsample_factor)
     strategy = s15m.Strategy()
-    result = run_backtest_1m(strategy, data, "15m")
+    result = backtest_interval.run_backtest_1m(strategy, data, "15m")
     if "error" in result:
         result["params"] = dict(overrides)
         result["_score"] = -1.0
@@ -545,7 +540,7 @@ def _symbol_sweep_worker(args: tuple) -> list[dict]:
     for overrides in combos:
         set_params(overrides, subsample_factor=1)
         strategy = s15m.Strategy()
-        result = run_backtest_1m(strategy, symbol_data, "15m")
+        result = backtest_interval.run_backtest_1m(strategy, symbol_data, "15m")
         result["params"] = dict(overrides)
         result["_symbol"] = symbol
         if "error" in result:
@@ -952,9 +947,13 @@ def run_walk_forward(
         test_bars = sum(len(df) for df in test_data.values())
 
         set_params(overrides, clear_symbol_params=not preserve_symbol_params)
-        train_result = run_backtest_1m(s15m.Strategy(), train_data, "15m")
+        train_result = backtest_interval.run_backtest_1m(
+            s15m.Strategy(), train_data, "15m"
+        )
         set_params(overrides, clear_symbol_params=not preserve_symbol_params)
-        test_result = run_backtest_1m(s15m.Strategy(), test_data, "15m")
+        test_result = backtest_interval.run_backtest_1m(
+            s15m.Strategy(), test_data, "15m"
+        )
 
         train_result["final_equity"] = train_result.get("final_equity", 10000.0)
         test_result["final_equity"] = test_result.get("final_equity", 10000.0)
@@ -1175,7 +1174,7 @@ def main():
     )
     args = parser.parse_args()
 
-    full_data = load_data(
+    full_data = backtest_interval.load_data(
         interval="15m", data_dir=str(_pipeline_root / "backtest_data" / "15m_candles")
     )
     if not full_data:
@@ -1212,7 +1211,7 @@ def main():
             for k, v in DEFAULTS.items():
                 if k not in best_params_accumulator:
                     best_params_accumulator[k] = v
-            print(f"  Starting from previous best params (score from file)")
+            print("  Starting from previous best params (score from file)")
         else:
             print("  No previous results found, starting from defaults")
 
@@ -1323,13 +1322,13 @@ def main():
         print(f"  Stepwise score: {stepwise_score:.2f}")
         print(f"  Best single result score: {best_overall_result['_score']:.2f}")
         if best_overall_result and stepwise_score < best_overall_result["_score"]:
-            print(f"  -> Stepwise WORSE than best single, using best single params")
+            print("  -> Stepwise WORSE than best single, using best single params")
             best_params_accumulator = best_overall_result["params"].copy()
             for k, v in DEFAULTS.items():
                 if k not in best_params_accumulator:
                     best_params_accumulator[k] = v
         else:
-            print(f"  -> Stepwise OK, keeping combined params")
+            print("  -> Stepwise OK, keeping combined params")
             best_params_accumulator = stepwise_params.copy()
 
     # ---- PHASE 3: ADAPTIVE MULTI-PARAMETER GRID (per-symbol) ----
@@ -1402,7 +1401,7 @@ def main():
             print("\n" + "=" * 90)
             print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID")
             print("=" * 90)
-            print(f"  Grid derived from phase 1-2 winners:")
+            print("  Grid derived from phase 1-2 winners:")
             for k, v in grid.items():
                 print(f"    {k}: {v}")
             print(f"  Total combinations: {total_combos}")

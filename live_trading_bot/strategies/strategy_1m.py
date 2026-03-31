@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from prepare import Signal, PortfolioState, BarData
+from prepare import Signal
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -129,7 +129,6 @@ class Strategy:
     def _calc_bb_width_pctile(self, closes, period):
         if len(closes) < period * 3:
             return 50.0
-        n = len(closes)
         windows = np.lib.stride_tricks.sliding_window_view(closes, period)
         sma = windows.mean(axis=1)
         std = windows.std(axis=1)
@@ -186,9 +185,6 @@ class Strategy:
 
             ret_vshort = (closes[-1] - closes[-SHORT_WINDOW]) / closes[-SHORT_WINDOW]
             ret_short = (closes[-1] - closes[-MED_WINDOW]) / closes[-MED_WINDOW]
-            ret_med = (closes[-1] - closes[-MED2_WINDOW]) / closes[-MED2_WINDOW]
-            ret_long = (closes[-1] - closes[-LONG_WINDOW]) / closes[-LONG_WINDOW]
-
             mom_bull = ret_short > dyn_threshold
             mom_bear = ret_short < -dyn_threshold
             vshort_bull = ret_vshort > dyn_threshold * 0.7
@@ -238,7 +234,6 @@ class Strategy:
             weight = SYMBOL_WEIGHTS.get(symbol, 0.33)
             if high_corr and symbol == "SOL":
                 weight *= 0.5
-            mom_strength = abs(ret_short) / dyn_threshold
             strength_scale = 1.0
             size = (
                 equity

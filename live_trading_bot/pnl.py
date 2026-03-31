@@ -16,9 +16,14 @@ import asyncio
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
-from config import get_private_key
-from exchange.hyperliquid import HyperliquidClient
+_PARENT_DIR = str(Path(__file__).resolve().parent.parent)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+
+from live_trading_bot.config import get_private_key
+from live_trading_bot.exchange.hyperliquid import HyperliquidClient
 
 
 def parse_window(arg: str) -> tuple[int, int, str]:
@@ -90,25 +95,27 @@ async def query_pnl(window: str = "today"):
     total = total_realized + total_funding + total_unrealized
 
     # Print
-    print(f"\n{'='*55}")
+    print(f"\n{'=' * 55}")
     print(f"  PnL Report — {label}")
     print(f"  Wallet: {account.wallet_address[:10]}...{account.wallet_address[-4:]}")
     print(f"  Equity: ${account.total_equity:.2f}")
-    print(f"{'='*55}")
+    print(f"{'=' * 55}")
 
     if all_symbols:
         print(f"\n  {'Symbol':<8} {'Realized':>10} {'Funding':>10} {'Unrealized':>10}")
-        print(f"  {'-'*8} {'-'*10} {'-'*10} {'-'*10}")
+        print(f"  {'-' * 8} {'-' * 10} {'-' * 10} {'-' * 10}")
         for sym in all_symbols:
             r = realized_by_symbol.get(sym, 0)
             f = funding_by_symbol.get(sym, 0)
             u = unrealized_by_symbol.get(sym, 0)
             print(f"  {sym:<8} {r:>+10.2f} {f:>+10.2f} {u:>+10.2f}")
 
-    print(f"\n  {'TOTAL':<8} {total_realized:>+10.2f} {total_funding:>+10.2f} {total_unrealized:>+10.2f}")
+    print(
+        f"\n  {'TOTAL':<8} {total_realized:>+10.2f} {total_funding:>+10.2f} {total_unrealized:>+10.2f}"
+    )
     print(f"\n  Net PnL: ${total:+.2f}")
     print(f"  Fills: {len(fills)} | Funding events: {len(funding)}")
-    print(f"{'='*55}\n")
+    print(f"{'=' * 55}\n")
 
 
 if __name__ == "__main__":

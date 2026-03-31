@@ -5,9 +5,9 @@ import time
 import pytest
 from unittest.mock import AsyncMock
 
-from config.settings import Settings
-from exchange.stop_manager import StopManager
-from exchange.types import (
+from live_trading_bot.config.settings import Settings
+from live_trading_bot.exchange.stop_manager import StopManager
+from live_trading_bot.exchange.types import (
     AccountState,
     Order,
     OrderSide,
@@ -16,9 +16,8 @@ from exchange.types import (
     Position,
     PositionSide,
 )
-from execution.execution_engine import ExecutionEngine
-from execution.signal_state import SignalState
-from monitoring.watchdog import Watchdog
+from live_trading_bot.execution.execution_engine import ExecutionEngine
+from live_trading_bot.execution.signal_state import SignalState
 
 
 def _make_filled_order(

@@ -1,5 +1,4 @@
 """Run all benchmark strategies and print leaderboard."""
-import sys
 import importlib
 import time
 from prepare import load_data, run_backtest, compute_score
