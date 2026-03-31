@@ -2,12 +2,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
-from exchange.order_manager import Signal
-from exchange.types import AccountState
-from storage.repository import Repository
-from storage.models import RiskEvent, RiskEventType
-from config import get_settings
-from monitoring.logger import get_logger
+from ..exchange.order_manager import Signal
+from ..exchange.types import AccountState
+from ..storage.repository import Repository
+from ..storage.models import RiskEvent, RiskEventType
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -67,7 +67,7 @@ class RiskController:
             )
 
             logger.critical(
-                f"Daily loss limit triggered",
+                "Daily loss limit triggered",
                 extra={
                     "daily_loss_pct": total_daily_loss_pct,
                     "limit_pct": self.settings.DAILY_LOSS_LIMIT_PCT,
@@ -112,7 +112,7 @@ class RiskController:
             self.volatility_triggered_symbols.add(symbol)
 
             logger.warning(
-                f"Volatility circuit breaker triggered",
+                "Volatility circuit breaker triggered",
                 extra={
                     "symbol": symbol,
                     "price_change_pct": price_change_pct,
@@ -129,7 +129,7 @@ class RiskController:
             if price_change_pct < self.settings.VOLATILITY_CIRCUIT_BREAKER_PCT * 0.5:
                 self.volatility_triggered_symbols.discard(symbol)
                 logger.info(
-                    f"Volatility normalized, re-enabled trading",
+                    "Volatility normalized, re-enabled trading",
                     extra={"symbol": symbol},
                 )
             else:
@@ -181,7 +181,7 @@ class RiskController:
             current_pos = current_positions.get(symbol, 0)
 
             if current_price <= 0:
-                logger.warning(f"Skipping signal - no price", extra={"symbol": symbol})
+                logger.warning("Skipping signal - no price", extra={"symbol": symbol})
                 continue
 
             vol_check = self.check_volatility_circuit_breaker(
@@ -192,7 +192,7 @@ class RiskController:
 
             pyramid_check = self.check_no_pyramiding(signal, current_pos)
             if not pyramid_check.allowed:
-                logger.info(f"Signal blocked - pyramiding", extra={"symbol": symbol})
+                logger.info("Signal blocked - pyramiding", extra={"symbol": symbol})
                 continue
 
             allowed_signals.append(signal)

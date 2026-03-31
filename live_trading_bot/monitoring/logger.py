@@ -4,7 +4,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-import os
 
 
 class JSONFormatter(logging.Formatter):

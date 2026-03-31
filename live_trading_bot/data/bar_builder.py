@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Callable
 import asyncio
 
-from exchange.types import Candle
-from config import get_settings
-from monitoring.logger import get_logger
+from ..exchange.types import Candle
+from ..config import get_settings
+from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -106,7 +106,7 @@ class BarBuilder:
         self.history_buffers[symbol].append(candle)
 
         logger.info(
-            f"Completed bar",
+            "Completed bar",
             extra={
                 "symbol": symbol,
                 "timestamp": datetime.fromtimestamp(
@@ -123,7 +123,7 @@ class BarBuilder:
                 else:
                     callback(symbol, candle)
             except Exception as e:
-                logger.error(f"Bar callback error", extra={"error": str(e)})
+                logger.error("Bar callback error", extra={"error": str(e)})
 
     def add_historical_candles(self, symbol: str, candles: List[Candle]):
         new_count = 0
@@ -147,7 +147,7 @@ class BarBuilder:
                 self._completed_bar_ts[symbol] = last_candle.timestamp
 
         logger.info(
-            f"Added historical candles",
+            "Added historical candles",
             extra={
                 "symbol": symbol,
                 "count": new_count,
