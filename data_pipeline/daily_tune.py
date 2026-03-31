@@ -179,7 +179,19 @@ def main():
 
         if not args.no_db:
             logger.info("Saving per-symbol results to database...")
-            n = save_snapshots_to_db(parsed, period)
+            snapshots = []
+            for symbol, params in (parsed.get("per_symbol_params") or {}).items():
+                score = parsed.get("per_symbol_scores", {}).get(symbol, 0)
+                if score <= 0:
+                    continue
+                snapshots.append({
+                    "symbol": symbol,
+                    "params": params,
+                    "score": score,
+                    "sweep_name": "daily_tune",
+                    "period": period,
+                })
+            n = save_snapshots_to_db(snapshots)
             logger.info("Saved %d snapshot(s)", n)
         else:
             logger.info("Skipping database (--no-db)")
