@@ -27,7 +27,6 @@ import math
 import itertools
 import json
 import argparse
-import multiprocessing as mp
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -38,7 +37,13 @@ _repo_root = _pipeline_root.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from . import backtest_interval
+from data_pipeline.backtest import backtest_interval
+from data_pipeline.pool import (
+    get_pool,
+    initialize as pool_initialize,
+    shutdown as pool_shutdown,
+    optimal_worker_count,
+)
 from live_trading_bot.strategies import strategy_15m as s15m
 
 BARS_PER_YEAR_15M = 4 * 24 * 365  # 35040
@@ -445,7 +450,11 @@ def _sweep_worker(args: tuple) -> dict:
 # SWEEP RUNNER
 # ---------------------------------------------------------------------------
 def run_sweep(
-    data, name: str, param_grid, n_workers: int = 1, subsample_factor: int = 1
+    data,
+    name: str,
+    param_grid,
+    n_workers: int = 1,
+    subsample_factor: int = 1,
 ) -> list[dict]:
     if isinstance(param_grid, list):
         combos = [dict(p) for p in param_grid]
@@ -457,30 +466,27 @@ def run_sweep(
     print(f"  Running {total} combinations for {name} ({n_workers} workers)...")
     t0 = time.time()
 
-    if n_workers > 1 and total > 1:
-        from concurrent.futures import ProcessPoolExecutor, as_completed
+    _pool = get_pool()
+    if _pool is not None and n_workers > 1 and total > 1:
+        from concurrent.futures import as_completed
 
-        ctx = mp.get_context("spawn")
         tasks = [(data, overrides, subsample_factor) for overrides in combos]
         timed_out = False
         try:
-            with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
-                futures = {
-                    executor.submit(_sweep_worker, t): i for i, t in enumerate(tasks)
-                }
-                timeout = max(300, total * 10)
-                raw = []
-                try:
-                    for future in as_completed(futures, timeout=timeout):
-                        try:
-                            raw.append(future.result(timeout=300))
-                        except Exception:
-                            pass
-                except TimeoutError:
-                    print(
-                        f"\n  [POOL TIMEOUT] after {timeout}s, falling back to sequential"
-                    )
-                    timed_out = True
+            futures = {_pool.submit(_sweep_worker, t): i for i, t in enumerate(tasks)}
+            timeout = max(300, total * 10)
+            raw = []
+            try:
+                for future in as_completed(futures, timeout=timeout):
+                    try:
+                        raw.append(future.result(timeout=300))
+                    except Exception:
+                        pass
+            except TimeoutError:
+                print(
+                    f"\n  [POOL TIMEOUT] after {timeout}s, falling back to sequential"
+                )
+                timed_out = True
             if timed_out:
                 raw = []
                 for overrides in combos:
@@ -584,10 +590,9 @@ def run_sweep_per_symbol(
     t0 = time.time()
     results: dict[str, list[dict]] = {}
 
-    if n_workers > 1:
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-
-        ctx = mp.get_context("spawn")
+    _pool = get_pool()
+    if _pool is not None and n_workers > 1:
+        from concurrent.futures import as_completed
 
         tasks = []
         for symbol in symbols:
@@ -595,26 +600,24 @@ def run_sweep_per_symbol(
             tasks.append((symbol, parquet_path, combos, subsample_factor))
 
         try:
-            with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
-                futures = {
-                    executor.submit(_symbol_sweep_worker, task): task[0]
-                    for task in tasks
-                }
-                for future in as_completed(
-                    futures, timeout=max(600, total_per_symbol * 15)
-                ):
-                    sym = futures[future]
-                    try:
-                        symbol_results = future.result(timeout=300)
-                        results[sym] = [
-                            r for r in symbol_results if r.get("_score", -1) >= 0
-                        ]
-                        print(
-                            f"    {sym}: {len(results[sym])}/{total_per_symbol} valid results"
-                        )
-                    except Exception as e:
-                        print(f"    {sym}: ERROR - {e}")
-                        results[sym] = []
+            futures = {
+                _pool.submit(_symbol_sweep_worker, task): task[0] for task in tasks
+            }
+            for future in as_completed(
+                futures, timeout=max(600, total_per_symbol * 15)
+            ):
+                sym = futures[future]
+                try:
+                    symbol_results = future.result(timeout=300)
+                    results[sym] = [
+                        r for r in symbol_results if r.get("_score", -1) >= 0
+                    ]
+                    print(
+                        f"    {sym}: {len(results[sym])}/{total_per_symbol} valid results"
+                    )
+                except Exception as e:
+                    print(f"    {sym}: ERROR - {e}")
+                    results[sym] = []
         except Exception as e:
             print(f"  [POOL ERROR] {e}, falling back to sequential")
             for symbol in symbols:
@@ -1163,8 +1166,8 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=mp.cpu_count(),
-        help=f"Parallel workers for sweeps (default={mp.cpu_count()})",
+        default=optimal_worker_count(),
+        help=f"Parallel workers for sweeps (default={optimal_worker_count()})",
     )
     parser.add_argument(
         "--load-previous",
@@ -1193,6 +1196,8 @@ def main():
     )
     print(f"Re-validating top {args.revalidate_top} per sweep on full data")
     print(f"Using {args.workers} parallel workers")
+
+    pool_initialize(args.workers)
 
     best_params_accumulator = DEFAULTS.copy()
     best_overall_result = None
@@ -1428,6 +1433,9 @@ def main():
                     best_params_accumulator.update(best["params"])
 
     # ---- PHASE 4: WALK-FORWARD VALIDATION ----
+    pool_shutdown()
+    print("  Pool shut down — sequential phases ahead.")
+
     wf_result = None
     stab_result = None
     if args.phase == "validate":

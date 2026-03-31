@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 import argparse
-import multiprocessing as mp
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime, timezone
@@ -25,6 +24,7 @@ from common import (
     compute_period,
     save_snapshots_to_db,
 )
+from data_pipeline.pool import optimal_worker_count
 
 logger = logging.getLogger("daily_tune")  # noqa: F821
 
@@ -119,8 +119,8 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=mp.cpu_count(),
-        help=f"Parallel workers for sweeps (default={mp.cpu_count()})",
+        default=optimal_worker_count(),
+        help=f"Parallel workers for sweeps (default={optimal_worker_count()})",
     )
     parser.add_argument(
         "--subsample",
@@ -184,13 +184,15 @@ def main():
                 score = parsed.get("per_symbol_scores", {}).get(symbol, 0)
                 if score <= 0:
                     continue
-                snapshots.append({
-                    "symbol": symbol,
-                    "params": params,
-                    "score": score,
-                    "sweep_name": "daily_tune",
-                    "period": period,
-                })
+                snapshots.append(
+                    {
+                        "symbol": symbol,
+                        "params": params,
+                        "score": score,
+                        "sweep_name": "daily_tune",
+                        "period": period,
+                    }
+                )
             n = save_snapshots_to_db(snapshots)
             logger.info("Saved %d snapshot(s)", n)
         else:

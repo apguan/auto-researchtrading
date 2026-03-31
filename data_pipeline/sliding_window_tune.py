@@ -21,7 +21,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone, timedelta
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dotenv import load_dotenv
 
 from common import (
@@ -32,12 +32,17 @@ from common import (
     run_optimization_pipeline,
     RESULTS_DIR,
 )
+from data_pipeline.pool import (
+    get_pool,
+    initialize as pool_initialize,
+    shutdown as pool_shutdown,
+    optimal_worker_count,
+)
 
 logger = logging.getLogger("sliding_window_tune")  # noqa: F821
 
 WINDOW_DAYS = 30
 HOURS_BACK = 1080
-MAX_WORKERS = 8
 INTERVAL = "15m"
 
 
@@ -211,12 +216,14 @@ def save_results_json(all_window_results: list[dict]) -> None:
             pass
 
 
-def print_summary(all_window_results: list[dict], elapsed: float) -> None:
+def print_summary(
+    all_window_results: list[dict], elapsed: float, n_workers: int
+) -> None:
     logger.info("=" * 70)
     logger.info("SLIDING WINDOW TUNE SUMMARY")
     logger.info("=" * 70)
     logger.info("Windows:    %d", len(all_window_results))
-    logger.info("Workers:    %d", MAX_WORKERS)
+    logger.info("Workers:    %d", n_workers)
     logger.info("Wall time:  %.1fs", elapsed)
 
     total_results = sum(wr["num_results"] for wr in all_window_results)
@@ -269,8 +276,8 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=MAX_WORKERS,
-        help=f"Parallel workers (default: {MAX_WORKERS})",
+        default=optimal_worker_count(),
+        help=f"Parallel workers (default: {optimal_worker_count()})",
     )
     parser.add_argument(
         "--lookback",
@@ -351,10 +358,11 @@ def main():
         t0 = time.time()
         all_window_results = []
 
-        with ProcessPoolExecutor(max_workers=args.workers) as executor:
-            futures = {
-                executor.submit(_run_window_worker, task): task for task in tasks
-            }
+        pool_initialize(args.workers)
+        _pool = get_pool()
+
+        if _pool is not None:
+            futures = {_pool.submit(_run_window_worker, task): task for task in tasks}
             completed = 0
             for future in as_completed(futures):
                 task = futures[future]
@@ -376,7 +384,6 @@ def main():
                         best_score,
                     )
 
-                    # Incremental save: record each window to DB immediately
                     best = result.get("best")
                     if best:
                         snap = {
@@ -415,6 +422,31 @@ def main():
                             "error": str(exc),
                         }
                     )
+        else:
+            logger.warning("Pool not available — running windows sequentially")
+            for task in tasks:
+                window_date = task[0]
+                window_idx = task[2]
+                try:
+                    result = _run_window_worker(task)
+                    all_window_results.append(result)
+                except Exception as exc:
+                    logger.error(
+                        "  Window %s (idx=%d) FAILED: %s", window_date, window_idx, exc
+                    )
+                    all_window_results.append(
+                        {
+                            "window_date": window_date,
+                            "window_idx": window_idx,
+                            "num_results": 0,
+                            "total_bars": 0,
+                            "results": [],
+                            "best": None,
+                            "error": str(exc),
+                        }
+                    )
+
+        pool_shutdown()
 
         all_window_results.sort(key=lambda x: x["window_idx"])
         logger.info(
@@ -432,7 +464,7 @@ def main():
             db_count,
         )
 
-        print_summary(all_window_results, time.time() - t_start)
+        print_summary(all_window_results, time.time() - t_start, args.workers)
 
     except Exception:
         logger.exception("Fatal error in sliding_window_tune")
