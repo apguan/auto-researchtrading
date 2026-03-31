@@ -14,7 +14,6 @@ for Railway deployment where the process should stay up indefinitely).
 """
 
 import argparse
-import asyncio
 import os
 import signal
 import sqlite3
@@ -24,7 +23,6 @@ import tempfile
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -175,7 +173,7 @@ def _compare_pair(a: dict, b: dict):
     print(f"    Signals only in {a['name']}: {a_only}")
     print(f"    Signals only in {b['name']}: {b_only}")
     if divergences:
-        print(f"    First divergences:")
+        print("    First divergences:")
         for d in divergences:
             print(d)
 
@@ -263,8 +261,8 @@ def main():
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    print(f"\nAll instances started.")
-    print(f"(Signals may take a minute to appear after first bar completes)\n")
+    print("\nAll instances started.")
+    print("(Signals may take a minute to appear after first bar completes)\n")
 
     try:
         elapsed = 0
