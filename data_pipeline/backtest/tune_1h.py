@@ -1,4 +1,4 @@
-"""15m Strategy Parameter Tuning — focused sweep over key parameters.
+"""1h Strategy Parameter Tuning — focused sweep over key parameters.
 
 Phases:
   1. Single-parameter sweeps (6 key params, per-symbol, subsampled)
@@ -17,7 +17,7 @@ Scoring (aligned with prepare.py compute_score()):
   Hard cutoffs (return -999): <10 trades, DD>50%, equity<50%
 
   Sharpe annualization: per_bar_sharpe * sqrt(bars_per_year)
-  For 15m bars: 4 bars/hr * 24 * 365 = 35040 bars/year
+  For 1h bars: 24 bars/day * 365 = 8760 bars/year
 """
 
 import sys
@@ -27,6 +27,7 @@ import math
 import itertools
 import json
 import argparse
+import random
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -44,16 +45,18 @@ from data_pipeline.pool import (
     shutdown as pool_shutdown,
     optimal_worker_count,
 )
-from live_trading_bot.strategies import strategy_15m as s15m
+import strategy as s1h
 
-BARS_PER_YEAR_15M = 4 * 24 * 365  # 35040
+s1h._SYMBOL_PARAMS = {}
+
+BARS_PER_YEAR_1H = 24 * 365  # 8760
 
 # ---------------------------------------------------------------------------
 # DEFAULTS
 # ---------------------------------------------------------------------------
 from constants import STRATEGY_DEFAULTS, BACKTEST_CAPITAL
 
-DEFAULTS = dict(STRATEGY_DEFAULTS["15m"])
+DEFAULTS = dict(STRATEGY_DEFAULTS["1h"])
 
 INT_PARAMS = {
     "SHORT_WINDOW",
@@ -77,7 +80,6 @@ INT_PARAMS = {
     "COOLDOWN_BARS",
     "MIN_VOTES",
     "CORR_LOOKBACK",
-    "BB_COMPRESS_PCTILE",
 }
 
 BAR_COUNT_PARAMS = {
@@ -106,7 +108,7 @@ BAR_COUNT_PARAMS = {
 def annualize_sharpe(per_bar_sharpe: float, bars_processed: int) -> float:
     if per_bar_sharpe == 0 or bars_processed < 20:
         return 0.0
-    return per_bar_sharpe * math.sqrt(BARS_PER_YEAR_15M)
+    return per_bar_sharpe * math.sqrt(BARS_PER_YEAR_1H)
 
 
 def score_result(r: dict) -> float:
@@ -130,7 +132,12 @@ def score_result(r: dict) -> float:
     trade_count_factor = min(num_trades / 50.0, 1.0)
     dd_penalty = max(0, max_dd - 15.0) * 0.05
 
-    annual_turnover = r.get("annual_turnover", 0.0)
+    # Correct annual_turnover for 1h bars.
+    # backtest_interval.py uses MINUTES_PER_YEAR / len(timestamps), treating
+    # each bar as 1 minute. For 1h data this inflates turnover by 60x.
+    # Divide by 60 to align with prepare.py's HOURS_PER_YEAR / len(timestamps).
+    raw_turnover = r.get("annual_turnover", 0.0)
+    annual_turnover = raw_turnover / 60.0
     turnover_ratio = annual_turnover / capital if capital > 0 else 0
     turnover_penalty = max(0, turnover_ratio - 500) * 0.001
 
@@ -170,7 +177,7 @@ def save_results(
     from datetime import datetime
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"tune_15m_{ts}.json"
+    filename = f"tune_1h_{ts}.json"
     filepath = _RESULTS_DIR / filename
 
     # Build serializable result
@@ -237,7 +244,7 @@ def load_latest_results() -> tuple[dict | None, str | None, dict[str, dict] | No
     if not _RESULTS_DIR.exists():
         return None, None, None
 
-    json_files = sorted(_RESULTS_DIR.glob("tune_15m_*.json"))
+    json_files = sorted(_RESULTS_DIR.glob("tune_1h_*.json"))
     if not json_files:
         return None, None, None
 
@@ -289,25 +296,67 @@ def subsample_data(data: dict, every_n: int = 4) -> dict:
 # SINGLE-PARAMETER SWEEPS
 # ---------------------------------------------------------------------------
 SINGLE_SWEEPS = [
-    ("RSI_PERIOD", {"RSI_PERIOD": [16, 20, 24, 28, 32, 40, 48]}),
+    ("RSI_PERIOD", {"RSI_PERIOD": [6, 7, 8, 9, 10, 12, 14, 16, 20]}),
     (
         "ATR_STOP_MULT",
-        {"ATR_STOP_MULT": [3.0, 4.0, 4.5, 5.0, 5.5, 6.0, 7.0, 8.0, 10.0]},
+        {
+            "ATR_STOP_MULT": [
+                3.0,
+                4.0,
+                4.5,
+                4.8,
+                5.0,
+                5.2,
+                5.5,
+                5.8,
+                6.0,
+                7.0,
+                8.0,
+                10.0,
+            ]
+        },
     ),
-    ("COOLDOWN_BARS", {"COOLDOWN_BARS": [2, 4, 6, 8, 12, 16, 20]}),
+    ("COOLDOWN_BARS", {"COOLDOWN_BARS": [1, 2, 3, 4, 5, 6, 8, 10, 12]}),
     (
         "BASE_POSITION_PCT",
-        {"BASE_POSITION_PCT": [0.02, 0.04, 0.08, 0.15, 0.30, 0.60, 1.0]},
+        {
+            "BASE_POSITION_PCT": [
+                0.02,
+                0.04,
+                0.06,
+                0.08,
+                0.10,
+                0.12,
+                0.15,
+                0.20,
+                0.30,
+            ]
+        },
     ),
     ("MIN_VOTES", {"MIN_VOTES": [3, 4, 5, 6]}),
     ("BASE_THRESHOLD", {"BASE_THRESHOLD": [0.005, 0.008, 0.010, 0.012, 0.015, 0.020]}),
+    ("SHORT_WINDOW", {"SHORT_WINDOW": [3, 4, 5, 6, 7, 8, 10]}),
+    ("MED_WINDOW", {"MED_WINDOW": [8, 10, 12, 14, 16, 18]}),
 ]
 
 # ---------------------------------------------------------------------------
 # SECONDARY SWEEPS — only parameters with demonstrated impact
 # ---------------------------------------------------------------------------
 SECONDARY_SWEEPS = [
-    ("BB_COMPRESS_PCTILE", {"BB_COMPRESS_PCTILE": [80, 85, 90, 95]}),
+    (
+        "RSI_BULL_BEAR",
+        [
+            {"RSI_BULL": 45, "RSI_BEAR": 55},
+            {"RSI_BULL": 48, "RSI_BEAR": 52},
+            {"RSI_BULL": 50, "RSI_BEAR": 50},
+            {"RSI_BULL": 52, "RSI_BEAR": 48},
+            {"RSI_BULL": 55, "RSI_BEAR": 45},
+            {"RSI_BULL": 60, "RSI_BEAR": 40},
+        ],
+    ),
+    ("BB_PERIOD", {"BB_PERIOD": [5, 6, 7, 8, 10, 12]}),
+    ("ATR_LOOKBACK", {"ATR_LOOKBACK": [12, 16, 20, 24, 30, 36, 48]}),
+    ("TARGET_VOL", {"TARGET_VOL": [0.008, 0.010, 0.012, 0.015, 0.018, 0.020, 0.025]}),
     (
         "RSI_OB_OS",
         [
@@ -315,7 +364,10 @@ SECONDARY_SWEEPS = [
             {"RSI_OVERBOUGHT": 69, "RSI_OVERSOLD": 31},
             {"RSI_OVERBOUGHT": 72, "RSI_OVERSOLD": 28},
             {"RSI_OVERBOUGHT": 75, "RSI_OVERSOLD": 25},
+            {"RSI_OVERBOUGHT": 78, "RSI_OVERSOLD": 22},
             {"RSI_OVERBOUGHT": 80, "RSI_OVERSOLD": 20},
+            {"RSI_OVERBOUGHT": 85, "RSI_OVERSOLD": 15},
+            {"RSI_OVERBOUGHT": 90, "RSI_OVERSOLD": 10},
         ],
     ),
 ]
@@ -326,38 +378,39 @@ SECONDARY_SWEEPS = [
 # ---------------------------------------------------------------------------
 def reset_params(clear_symbol_params: bool = True):
     if clear_symbol_params:
-        s15m._SYMBOL_PARAMS = {}
+        s1h._SYMBOL_PARAMS = {}
     for k, v in DEFAULTS.items():
-        setattr(s15m, k, v)
+        setattr(s1h, k, v)
 
 
 def set_params(
     overrides: dict, subsample_factor: int = 1, clear_symbol_params: bool = True
 ):
     if clear_symbol_params:
-        s15m._SYMBOL_PARAMS = {}
+        s1h._SYMBOL_PARAMS = {}
     for k, v in DEFAULTS.items():
         if subsample_factor > 1 and k in BAR_COUNT_PARAMS:
-            setattr(s15m, k, max(1, int(round(v / subsample_factor))))
+            setattr(s1h, k, max(1, int(round(v / subsample_factor))))
         else:
-            setattr(s15m, k, v)
+            setattr(s1h, k, v)
     for k, v in overrides.items():
         if subsample_factor > 1 and k in BAR_COUNT_PARAMS:
             v = max(1, int(round(v / subsample_factor)))
         if k in INT_PARAMS:
             v = int(v)
-        setattr(s15m, k, v)
+        setattr(s1h, k, v)
 
 
 def set_params_per_symbol(per_symbol_params: dict[str, dict]):
     """Set per-symbol params for joint backtest (walk-forward, stability).
 
-    Sets _SYMBOL_PARAMS to the provided per-symbol dict, resets module-level
-    attrs to DEFAULTS as fallback values.
+    NOTE: strategy.py does not read _SYMBOL_PARAMS in on_bar(), so per-symbol
+    overrides have NO EFFECT unless strategy.py is updated to support them.
+    Per-symbol sweeps will run but all symbols use the same global params.
     """
-    s15m._SYMBOL_PARAMS = {s: dict(p) for s, p in per_symbol_params.items()}
+    s1h._SYMBOL_PARAMS = {s: dict(p) for s, p in per_symbol_params.items()}
     for k, v in DEFAULTS.items():
-        setattr(s15m, k, v)
+        setattr(s1h, k, v)
 
 
 def run_once(
@@ -371,8 +424,8 @@ def run_once(
         subsample_factor=subsample_factor,
         clear_symbol_params=not preserve_symbol_params,
     )
-    strategy = s15m.Strategy()
-    result = backtest_interval.run_backtest_1m(strategy, data, "15m")
+    strategy = s1h.Strategy()
+    result = backtest_interval.run_backtest_1m(strategy, data, "1h")
     if "error" in result:
         return result
     result["params"] = dict(overrides)
@@ -390,8 +443,8 @@ def _sweep_worker(args: tuple) -> dict:
     """
     data, overrides, subsample_factor = args
     set_params(overrides, subsample_factor=subsample_factor)
-    strategy = s15m.Strategy()
-    result = backtest_interval.run_backtest_1m(strategy, data, "15m")
+    strategy = s1h.Strategy()
+    result = backtest_interval.run_backtest_1m(strategy, data, "1h")
     if "error" in result:
         result["params"] = dict(overrides)
         result["_score"] = -1.0
@@ -500,8 +553,8 @@ def _symbol_sweep_worker(args: tuple) -> list[dict]:
     results = []
     for overrides in combos:
         set_params(overrides, subsample_factor=1)
-        strategy = s15m.Strategy()
-        result = backtest_interval.run_backtest_1m(strategy, symbol_data, "15m")
+        strategy = s1h.Strategy()
+        result = backtest_interval.run_backtest_1m(strategy, symbol_data, "1h")
         result["params"] = dict(overrides)
         result["_symbol"] = symbol
         if "error" in result:
@@ -540,7 +593,7 @@ def run_sweep_per_symbol(
     )
 
     if data_dir is None:
-        data_dir = str(_pipeline_root / "backtest_data" / "15m_candles")
+        data_dir = str(_pipeline_root / "backtest_data" / "1h_candles")
 
     t0 = time.time()
     results: dict[str, list[dict]] = {}
@@ -551,7 +604,7 @@ def run_sweep_per_symbol(
 
         tasks = []
         for symbol in symbols:
-            parquet_path = os.path.join(data_dir, f"{symbol}_15m.parquet")
+            parquet_path = os.path.join(data_dir, f"{symbol}_1h.parquet")
             tasks.append((symbol, parquet_path, combos, subsample_factor))
 
         try:
@@ -752,6 +805,89 @@ def forward_stepwise_accumulate(
     return current_params, current_score
 
 
+def random_search_phase(
+    full_data: dict,
+    best_params: dict,
+    all_phase_results: list[dict],
+    n_iterations: int = 60,
+    seed: int = 42,
+) -> tuple[dict, float]:
+    """Random multi-param perturbations to find synergistic combos.
+
+    Tests random combinations of 2-4 simultaneous param changes.
+    Complements the greedy stepwise by exploring non-additive interactions.
+    """
+    rng = random.Random(seed)
+
+    # Build param ranges from all sweep definitions
+    param_ranges: dict[str, list] = {}
+    for _name, grid in SINGLE_SWEEPS + SECONDARY_SWEEPS:
+        if isinstance(grid, list):
+            # Paired sweep (e.g., RSI_BULL_BEAR, RSI_OB_OS) — add individual keys
+            for combo in grid:
+                for k, v in combo.items():
+                    if k not in param_ranges:
+                        param_ranges[k] = []
+                    if v not in param_ranges[k]:
+                        param_ranges[k].append(v)
+        else:
+            for k, vals in grid.items():
+                if k not in param_ranges:
+                    param_ranges[k] = list(vals)
+                else:
+                    for v in vals:
+                        if v not in param_ranges[k]:
+                            param_ranges[k].append(v)
+
+    # Filter to only params that are tunable (in INT_PARAMS or float params)
+    tunable_keys = [
+        k
+        for k in param_ranges
+        if k in INT_PARAMS or isinstance(param_ranges[k][0], float)
+    ]
+
+    current_params = best_params.copy()
+    current_score = 0.0
+    baseline_result = run_once(full_data, current_params)
+    if "error" not in baseline_result:
+        current_score = baseline_result["_score"]
+
+    print(f"  Random search baseline score: {current_score:.2f}")
+    print(f"  Testing {n_iterations} random multi-param combinations...")
+
+    improved = 0
+    for i in range(n_iterations):
+        # Pick 2-4 random params to perturb simultaneously
+        n_perturb = rng.randint(2, min(4, len(tunable_keys)))
+        chosen_keys = rng.sample(tunable_keys, n_perturb)
+
+        test_params = current_params.copy()
+        for k in chosen_keys:
+            test_params[k] = rng.choice(param_ranges[k])
+
+        test_result = run_once(full_data, test_params)
+        if "error" in test_result:
+            continue
+
+        test_score = test_result["_score"]
+        if test_score > current_score:
+            changes = {
+                k: v for k, v in test_params.items() if v != current_params.get(k)
+            }
+            print(
+                f"    [{i + 1}] IMPROVE {current_score:.2f} -> {test_score:.2f}  {changes}"
+            )
+            current_params = test_params
+            current_score = test_score
+            improved += 1
+            all_phase_results.append(test_result)
+
+    print(
+        f"  Random search: {improved}/{n_iterations} improved, final score: {current_score:.2f}"
+    )
+    return current_params, current_score
+
+
 def revalidate_per_symbol(
     full_data: dict,
     per_symbol_results: dict[str, list[dict]],
@@ -792,6 +928,12 @@ ADAPTIVE_GRID_PARAMS = {
     "RSI_PERIOD": lambda v: sorted(
         set([max(8, v - 8), max(8, v - 4), v, v + 4, v + 8])
     ),
+    "RSI_OVERBOUGHT": lambda v: sorted(
+        set([max(55, v - 15), max(55, v - 8), v, min(95, v + 8), min(95, v + 15)])
+    ),
+    "RSI_OVERSOLD": lambda v: sorted(
+        set([max(5, v - 15), max(5, v - 8), v, min(45, v + 8), min(45, v + 15)])
+    ),
     "BASE_POSITION_PCT": lambda v: sorted(
         set(
             [
@@ -811,6 +953,30 @@ ADAPTIVE_GRID_PARAMS = {
     "BASE_THRESHOLD": lambda v: sorted(
         set([round(v * 0.7, 4), round(v, 4), round(v * 1.3, 4)])
     ),
+    "SHORT_WINDOW": lambda v: sorted(
+        set([max(2, v - 3), max(2, v - 1), v, v + 1, v + 3])
+    ),
+    "MED_WINDOW": lambda v: sorted(
+        set([max(4, v - 6), max(4, v - 3), v, v + 3, v + 6])
+    ),
+    "RSI_BULL": lambda v: sorted(
+        set([max(35, v - 10), max(35, v - 5), v, min(65, v + 5), min(65, v + 10)])
+    ),
+    "BB_PERIOD": lambda v: sorted(set([max(3, v - 4), max(3, v - 2), v, v + 2, v + 4])),
+    "ATR_LOOKBACK": lambda v: sorted(
+        set([max(8, v - 12), max(8, v - 6), v, v + 6, v + 12])
+    ),
+    "TARGET_VOL": lambda v: sorted(
+        set(
+            [
+                round(max(0.005, v * 0.5), 4),
+                round(v * 0.75, 4),
+                round(v, 4),
+                round(v * 1.5, 4),
+                round(v * 2.0, 4),
+            ]
+        )
+    ),
 }
 
 
@@ -819,7 +985,7 @@ def build_adaptive_grid(best_params: dict) -> dict:
 
     ALWAYS includes RSI_PERIOD (most impactful parameter).
     Includes other params that changed from defaults.
-    Caps total combinations at 36 to prevent timeout.
+    Caps total combinations at 200 to prevent timeout.
     """
     grid = {}
 
@@ -839,13 +1005,13 @@ def build_adaptive_grid(best_params: dict) -> dict:
             val = int(val)
         grid[param] = ADAPTIVE_GRID_PARAMS[param](val)
 
-        # Check total combos — cap at 36
+        # Check total combos — cap at 200
         total = 1
         for v in grid.values():
             total *= len(v)
-        if total > 36:
+        if total > 200:
             excess = total // len(grid[param])
-            max_vals = 36 // excess
+            max_vals = 200 // excess
             if max_vals < 2:
                 del grid[param]
                 break
@@ -906,12 +1072,10 @@ def run_walk_forward(
 
         set_params(overrides, clear_symbol_params=not preserve_symbol_params)
         train_result = backtest_interval.run_backtest_1m(
-            s15m.Strategy(), train_data, "15m"
+            s1h.Strategy(), train_data, "1h"
         )
         set_params(overrides, clear_symbol_params=not preserve_symbol_params)
-        test_result = backtest_interval.run_backtest_1m(
-            s15m.Strategy(), test_data, "15m"
-        )
+        test_result = backtest_interval.run_backtest_1m(s1h.Strategy(), test_data, "1h")
 
         train_result["final_equity"] = train_result.get("final_equity", 100_000.0)
         test_result["final_equity"] = test_result.get("final_equity", 100_000.0)
@@ -1098,7 +1262,7 @@ def print_stability(stab: dict):
 # MAIN
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="15m Strategy Parameter Tuning")
+    parser = argparse.ArgumentParser(description="1h Strategy Parameter Tuning")
     parser.add_argument(
         "--phase",
         choices=["single", "secondary", "multi", "validate", "all"],
@@ -1109,8 +1273,8 @@ def main():
     parser.add_argument(
         "--subsample",
         type=int,
-        default=4,
-        help="Take every Nth bar for screening (default=4, ~4x speedup). Use 1 for full data.",
+        default=1,
+        help="Take every Nth bar for screening (default=1, no subsampling for 1h).",
     )
     parser.add_argument(
         "--revalidate-top",
@@ -1130,14 +1294,30 @@ def main():
         default=False,
         help="Load best params from latest tuning_results/ JSON as starting point",
     )
+    parser.add_argument(
+        "--skip-symbols",
+        type=str,
+        default="HYPE",
+        help="Comma-separated symbols to skip (default=HYPE, which had 0 valid results)",
+    )
     args = parser.parse_args()
 
     full_data = backtest_interval.load_data(
-        interval="15m", data_dir=str(_pipeline_root / "backtest_data" / "15m_candles")
+        interval="1h", data_dir=str(_pipeline_root / "backtest_data" / "1h_candles")
     )
     if not full_data:
         print("ERROR: No data loaded")
         sys.exit(1)
+
+    skip_symbols = set(
+        s.strip().upper() for s in args.skip_symbols.split(",") if s.strip()
+    )
+    if skip_symbols:
+        skipped = [s for s in full_data if s in skip_symbols]
+        if skipped:
+            print(f"  Skipping symbols: {skipped}")
+            full_data = {s: d for s, d in full_data.items() if s not in skip_symbols}
+
     total_bars = sum(len(df) for df in full_data.values())
     print(
         f"Loaded {total_bars} bars across {len(full_data)} symbols: {list(full_data.keys())}"
@@ -1157,15 +1337,10 @@ def main():
     best_params_accumulator = DEFAULTS.copy()
     best_overall_result = None
     all_phase_results = []
-    per_symbol_best_accumulator: dict[str, tuple[dict, float]] | None = None
 
     previous_file = None
     if args.load_previous:
-        prev_params, previous_file, prev_per_symbol = load_latest_results()
-        if prev_per_symbol:
-            per_symbol_best_accumulator = {
-                s: (p, 0.0) for s, p in prev_per_symbol.items()
-            }
+        prev_params, previous_file, _prev_per_symbol = load_latest_results()
         if prev_params:
             best_params_accumulator = prev_params.copy()
             for k, v in DEFAULTS.items():
@@ -1175,14 +1350,13 @@ def main():
         else:
             print("  No previous results found, starting from defaults")
 
-    # ---- PHASE 1: SINGLE-PARAMETER SWEEPS (screen on subsampled, per-symbol) ----
-    per_symbol_phase_results: dict[str, list[dict]] = {}
+    # ---- PHASE 1: SINGLE-PARAMETER SWEEPS (screen on subsampled) ----
     if args.phase in ("single", "all"):
         print("\n" + "=" * 90)
-        print("PHASE 1: SINGLE-PARAMETER SWEEPS (per-symbol, subsampled)")
+        print("PHASE 1: SINGLE-PARAMETER SWEEPS (subsampled)")
         print("=" * 90)
         for name, grid in SINGLE_SWEEPS:
-            per_symbol_results = run_sweep_per_symbol(
+            results = run_sweep(
                 screen_data,
                 name,
                 grid,
@@ -1190,30 +1364,24 @@ def main():
                 subsample_factor=args.subsample,
             )
             if args.subsample > 1:
-                per_symbol_results = revalidate_per_symbol(
-                    full_data, per_symbol_results, top_n=args.revalidate_top
-                )
-            for symbol, results in per_symbol_results.items():
-                if symbol not in per_symbol_phase_results:
-                    per_symbol_phase_results[symbol] = []
-                per_symbol_phase_results[symbol].extend(results)
-                if results:
-                    best_screen = print_results(results, f"{name} [{symbol}]")
-                    all_phase_results.extend(results)
-                    best_r = results[0]
-                    if (
-                        best_overall_result is None
-                        or best_r["_score"] > best_overall_result["_score"]
-                    ):
-                        best_overall_result = best_r
+                results = revalidate(full_data, results, top_n=args.revalidate_top)
+            if results:
+                best_screen = print_results(results, name)
+                all_phase_results.extend(results)
+                best_r = results[0]
+                if (
+                    best_overall_result is None
+                    or best_r["_score"] > best_overall_result["_score"]
+                ):
+                    best_overall_result = best_r
 
-    # ---- PHASE 2: SECONDARY SWEEPS (screen on subsampled, per-symbol) ----
+    # ---- PHASE 2: SECONDARY SWEEPS (screen on subsampled) ----
     if args.phase in ("secondary", "all"):
         print("\n" + "=" * 90)
-        print("PHASE 2: SECONDARY SWEEPS (per-symbol, subsampled)")
+        print("PHASE 2: SECONDARY SWEEPS (subsampled)")
         print("=" * 90)
         for name, grid in SECONDARY_SWEEPS:
-            per_symbol_results = run_sweep_per_symbol(
+            results = run_sweep(
                 screen_data,
                 name,
                 grid,
@@ -1221,52 +1389,20 @@ def main():
                 subsample_factor=args.subsample,
             )
             if args.subsample > 1:
-                per_symbol_results = revalidate_per_symbol(
-                    full_data, per_symbol_results, top_n=args.revalidate_top
-                )
-            for symbol, results in per_symbol_results.items():
-                if symbol not in per_symbol_phase_results:
-                    per_symbol_phase_results[symbol] = []
-                per_symbol_phase_results[symbol].extend(results)
-                if results:
-                    best_screen = print_results(results, f"{name} [{symbol}]")
-                    all_phase_results.extend(results)
-                    best_r = results[0]
-                    if (
-                        best_overall_result is None
-                        or best_r["_score"] > best_overall_result["_score"]
-                    ):
-                        best_overall_result = best_r
+                results = revalidate(full_data, results, top_n=args.revalidate_top)
+            if results:
+                best_screen = print_results(results, name)
+                all_phase_results.extend(results)
+                best_r = results[0]
+                if (
+                    best_overall_result is None
+                    or best_r["_score"] > best_overall_result["_score"]
+                ):
+                    best_overall_result = best_r
 
-    # ---- FORWARD STEPWISE ACCUMULATOR (per-symbol) ----
+    # ---- FORWARD STEPWISE ACCUMULATOR ----
     stepwise_score = 0.0
-    if per_symbol_phase_results and args.phase in ("secondary", "multi", "all"):
-        print("\n" + "=" * 90)
-        print("FORWARD STEPWISE ACCUMULATOR (per-symbol)")
-        print("=" * 90)
-        per_symbol_best_accumulator = forward_stepwise_per_symbol(
-            full_data, per_symbol_phase_results, initial_params=best_params_accumulator
-        )
-        for symbol, (params, score) in per_symbol_best_accumulator.items():
-            changes = {k: v for k, v in params.items() if v != DEFAULTS.get(k)}
-            print(f"  {symbol} stepwise changes: {changes}, score: {score:.2f}")
-        per_symbol_params = {
-            s: params for s, (params, score) in per_symbol_best_accumulator.items()
-        }
-        set_params_per_symbol(per_symbol_params)
-        joint_result = run_once(full_data, DEFAULTS.copy(), preserve_symbol_params=True)
-        if "error" not in joint_result:
-            stepwise_score = joint_result["_score"]
-            print(
-                f"  Joint portfolio score with per-symbol params: {stepwise_score:.2f}"
-            )
-            if (
-                best_overall_result is None
-                or stepwise_score > best_overall_result["_score"]
-            ):
-                joint_result["params"] = best_params_accumulator.copy()
-                best_overall_result = joint_result
-    elif best_overall_result is not None and args.phase in (
+    if best_overall_result is not None and args.phase in (
         "secondary",
         "multi",
         "all",
@@ -1291,101 +1427,61 @@ def main():
             print("  -> Stepwise OK, keeping combined params")
             best_params_accumulator = stepwise_params.copy()
 
-    # ---- PHASE 3: ADAPTIVE MULTI-PARAMETER GRID (per-symbol) ----
+    # ---- RANDOM SEARCH PHASE ----
+    if args.phase in ("multi", "all") and all_phase_results:
+        print("\n" + "=" * 90)
+        print("RANDOM SEARCH PHASE (multi-param perturbations)")
+        print("=" * 90)
+        random_params, random_score = random_search_phase(
+            full_data, best_params_accumulator, all_phase_results
+        )
+        if random_score > stepwise_score:
+            changes = {k: v for k, v in random_params.items() if v != DEFAULTS.get(k)}
+            print(
+                f"  Random search improved: {stepwise_score:.2f} -> {random_score:.2f}"
+            )
+            print(f"  Changes: {changes}")
+            best_params_accumulator = random_params
+
+    # ---- PHASE 3: ADAPTIVE MULTI-PARAMETER GRID ----
     if args.phase in ("multi", "all"):
-        if per_symbol_best_accumulator:
-            per_symbol_grid = build_adaptive_grid_per_symbol(
-                per_symbol_best_accumulator
-            )
-            print("\n" + "=" * 90)
-            print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID (per-symbol)")
-            print("=" * 90)
-            for symbol, grid in per_symbol_grid.items():
-                total_combos = 1
-                for v in grid.values():
-                    total_combos *= len(v)
-                print(f"  {symbol} adaptive grid: {total_combos} combinations")
-
-                symbol_screen = {symbol: screen_data[symbol]}
-                results = run_sweep(
-                    symbol_screen,
-                    f"ADAPTIVE [{symbol}]",
-                    grid,
-                    n_workers=min(args.workers, total_combos),
-                    subsample_factor=args.subsample,
-                )
-                best_screen = print_results(results, f"ADAPTIVE [{symbol}]")
-                if results and args.subsample > 1:
-                    symbol_full = {symbol: full_data[symbol]}
-                    validated = revalidate(
-                        symbol_full, results, top_n=min(10, len(results))
-                    )
-                    if validated:
-                        print_results(
-                            validated,
-                            f"ADAPTIVE [{symbol}] (full)",
-                            top_n=len(validated),
-                        )
-                        current_params, _ = per_symbol_best_accumulator.get(
-                            symbol, (DEFAULTS.copy(), 0.0)
-                        )
-                        current_params = current_params.copy()
-                        current_params.update(validated[0]["params"])
-                        per_symbol_best_accumulator[symbol] = (
-                            current_params,
-                            validated[0]["_score"],
-                        )
-                        all_phase_results.extend(validated)
-                        if (
-                            best_overall_result is None
-                            or validated[0]["_score"] > best_overall_result["_score"]
-                        ):
-                            best_overall_result = validated[0]
-                elif best_screen:
-                    all_phase_results.append(best_screen)
-                    if (
-                        best_overall_result is None
-                        or best_screen["_score"] > best_overall_result["_score"]
-                    ):
-                        best_overall_result = best_screen
+        if args.multi_grid:
+            grid = json.loads(args.multi_grid)
         else:
-            if args.multi_grid:
-                grid = json.loads(args.multi_grid)
-            else:
-                grid = build_adaptive_grid(best_params_accumulator)
+            grid = build_adaptive_grid(best_params_accumulator)
 
-            total_combos = 1
-            for v in grid.values():
-                total_combos *= len(v)
+        total_combos = 1
+        for v in grid.values():
+            total_combos *= len(v)
 
-            print("\n" + "=" * 90)
-            print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID")
-            print("=" * 90)
-            print("  Grid derived from phase 1-2 winners:")
-            for k, v in grid.items():
-                print(f"    {k}: {v}")
-            print(f"  Total combinations: {total_combos}")
+        print("\n" + "=" * 90)
+        print("PHASE 3: ADAPTIVE MULTI-PARAMETER GRID")
+        print("=" * 90)
+        print("  Grid derived from phase 1-2 winners:")
+        for k, v in grid.items():
+            print(f"    {k}: {v}")
+        print(f"  Total combinations: {total_combos}")
 
-            results = run_sweep(
-                screen_data,
-                "ADAPTIVE_MULTI (subsampled)",
-                grid,
-                n_workers=args.workers,
-                subsample_factor=args.subsample,
-            )
-            if results and args.subsample > 1:
-                top_n = min(10, len(results))
-                validated = revalidate(full_data, results, top_n=top_n)
-                if validated:
-                    print_results(
-                        validated, "ADAPTIVE_MULTI (full data)", top_n=len(validated)
-                    )
-                    best_params_accumulator.update(validated[0]["params"])
-                    all_phase_results.extend(validated)
-            else:
-                best = print_results(results, "ADAPTIVE_MULTI")
-                if best:
-                    best_params_accumulator.update(best["params"])
+        results = run_sweep(
+            screen_data,
+            "ADAPTIVE_MULTI (subsampled)",
+            grid,
+            n_workers=args.workers,
+            subsample_factor=args.subsample,
+        )
+        if results and args.subsample > 1:
+            top_n = min(10, len(results))
+            validated = revalidate(full_data, results, top_n=top_n)
+            if validated:
+                print_results(
+                    validated, "ADAPTIVE_MULTI (full data)", top_n=len(validated)
+                )
+                best_params_accumulator.update(validated[0]["params"])
+                all_phase_results.extend(validated)
+        else:
+            best = print_results(results, "ADAPTIVE_MULTI")
+            if best:
+                best_params_accumulator.update(best["params"])
 
     # ---- PHASE 4: WALK-FORWARD VALIDATION ----
     pool_shutdown()
@@ -1412,24 +1508,11 @@ def main():
         print("\n" + "=" * 90)
         print("PHASE 4: WALK-FORWARD VALIDATION (best candidate)")
         print("=" * 90)
-        if per_symbol_best_accumulator:
-            per_symbol_params = {
-                s: params for s, (params, score) in per_symbol_best_accumulator.items()
-            }
-            set_params_per_symbol(per_symbol_params)
-            print("  Using per-symbol params for joint walk-forward:")
-            for symbol, params in per_symbol_params.items():
-                changes = {k: v for k, v in params.items() if v != DEFAULTS.get(k)}
-                print(f"    {symbol}: {changes}")
-            wf = run_walk_forward(
-                full_data, best_params_accumulator, preserve_symbol_params=True
-            )
-        else:
-            print("  Params changed from defaults:")
-            for k, v in sorted(best_params_accumulator.items()):
-                if v != DEFAULTS.get(k):
-                    print(f"    {k}: {DEFAULTS.get(k)} -> {v}")
-            wf = run_walk_forward(full_data, best_params_accumulator)
+        print("  Params changed from defaults:")
+        for k, v in sorted(best_params_accumulator.items()):
+            if v != DEFAULTS.get(k):
+                print(f"    {k}: {DEFAULTS.get(k)} -> {v}")
+        wf = run_walk_forward(full_data, best_params_accumulator)
         if "error" not in wf:
             print_walk_forward(wf)
             wf_result = wf
@@ -1437,16 +1520,7 @@ def main():
         print("\n" + "=" * 90)
         print("PHASE 5: PARAMETER STABILITY TEST")
         print("=" * 90)
-        if per_symbol_best_accumulator:
-            ps_for_stab = {
-                s: params for s, (params, score) in per_symbol_best_accumulator.items()
-            }
-            set_params_per_symbol(ps_for_stab)
-            stab = test_stability(
-                full_data, best_params_accumulator, preserve_symbol_params=True
-            )
-        else:
-            stab = test_stability(full_data, best_params_accumulator)
+        stab = test_stability(full_data, best_params_accumulator)
         print_stability(stab)
         stab_result = stab
 
@@ -1490,16 +1564,6 @@ def main():
         else:
             save_params = best_params_accumulator
 
-        per_symbol_save_params = None
-        per_symbol_save_scores = None
-        if per_symbol_best_accumulator:
-            per_symbol_save_params = {
-                s: params for s, (params, score) in per_symbol_best_accumulator.items()
-            }
-            per_symbol_save_scores = {
-                s: score for s, (params, score) in per_symbol_best_accumulator.items()
-            }
-
         save_results(
             save_params,
             best_overall_result.get("_score", 0),
@@ -1507,8 +1571,6 @@ def main():
             wf_result,
             stab_result,
             previous_file=previous_file,
-            per_symbol_best_params=per_symbol_save_params,
-            per_symbol_best_scores=per_symbol_save_scores,
         )
 
     reset_params()

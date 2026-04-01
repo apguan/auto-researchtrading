@@ -82,7 +82,7 @@ BACKTEST_LOOKBACK_BARS: dict[str, int] = {
 # Capital
 # ---------------------------------------------------------------------------
 INITIAL_CAPITAL = 100_000.0
-BACKTEST_CAPITAL = 10_000.0
+BACKTEST_CAPITAL = 100_000.0
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "ATR_LOOKBACK": 24,
         "ATR_STOP_MULT": 5.5,
         "VOL_LOOKBACK": 36,
-        "BASE_POSITION_PCT": 0.08,
+        "BASE_POSITION_PCT": 0.088,
         "COOLDOWN_BARS": 2,
         "FUNDING_LOOKBACK": 24,
         "CORR_LOOKBACK": 72,
