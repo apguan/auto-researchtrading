@@ -775,3 +775,8 @@
 2026-04-01 14:27:55,439 [INFO] Adaptive multi-parameter grid
 2026-04-01 14:27:55,439 [INFO] Grid: 150 combos over 4 params
 2026-04-01 14:56:10,444 [INFO] Pool shut down — running walk-forward
+2026-04-01 15:01:57,131 [INFO] Committed: tune_1h: iteration 4 — score=11.54 (PASS)
+2026-04-01 15:01:57,131 [INFO] CONVERGED: improvement below 2.0% for 3 consecutive iterations
+2026-04-01 15:01:57,131 [INFO] Updating strategy.py with best params...
+2026-04-01 15:01:57,132 [INFO] Strategy.py changes: {'MED_WINDOW': 8, 'ATR_LOOKBACK': 30, 'ATR_STOP_MULT': 7.0, 'BASE_POSITION_PCT': 0.024, 'COOLDOWN_BARS': 4, 'RSI_BEAR': 55, 'RSI_OVERBOUGHT': 73, 'RSI_OVERSOLD': 28, 'MIN_VOTES': 3, 'BASE_THRESHOLD': 0.01}
+2026-04-01 15:01:57,132 [INFO] Updated strategy.py with 10 param changes

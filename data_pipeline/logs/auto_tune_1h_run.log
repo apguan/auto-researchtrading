@@ -1265,3 +1265,35 @@ Stability:      N/A
 Params changed: ATR_LOOKBACK=24->30, ATR_STOP_MULT=5.5->7.0, BASE_POSITION_PCT=0.088->0.024, BASE_THRESHOLD=0.012->0.01, COOLDOWN_BARS=2->4, MED_WINDOW=12->8, MIN_VOTES=4->3, RSI_BEAR=50->55, RSI_OVERBOUGHT=69->73, RSI_OVERSOLD=31->28
 Wall time:      4453s
 ==========================================================================================
+15:01:57 [INFO] Committed: tune_1h: iteration 4 — score=11.54 (PASS)
+15:01:57 [INFO] CONVERGED: improvement below 2.0% for 3 consecutive iterations
+
+==========================================================================================
+AUTO TUNE 1H — FINAL SUMMARY
+==========================================================================================
+Total iterations: 4
+Converged:        YES
+Total wall time:  17690s (294.8min)
+
+ Iter      Score     Change
+------------------------------
+    1      11.54 (baseline)
+    2      11.57      +0.3%
+    3      11.57      +0.0%
+    4      11.54      -0.3%
+
+Best parameters (vs defaults):
+               ATR_LOOKBACK: 24 -> 30
+              ATR_STOP_MULT: 5.5 -> 7.0
+          BASE_POSITION_PCT: 0.088 -> 0.024
+             BASE_THRESHOLD: 0.012 -> 0.01
+              COOLDOWN_BARS: 2 -> 4
+                 MED_WINDOW: 12 -> 8
+                  MIN_VOTES: 4 -> 3
+                   RSI_BEAR: 50 -> 55
+             RSI_OVERBOUGHT: 69 -> 73
+               RSI_OVERSOLD: 31 -> 28
+==========================================================================================
+15:01:57 [INFO] Updating strategy.py with best params...
+15:01:57 [INFO] Strategy.py changes: {'MED_WINDOW': 8, 'ATR_LOOKBACK': 30, 'ATR_STOP_MULT': 7.0, 'BASE_POSITION_PCT': 0.024, 'COOLDOWN_BARS': 4, 'RSI_BEAR': 55, 'RSI_OVERBOUGHT': 73, 'RSI_OVERSOLD': 28, 'MIN_VOTES': 3, 'BASE_THRESHOLD': 0.01}
+15:01:57 [INFO] Updated strategy.py with 10 param changes
