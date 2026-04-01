@@ -40,12 +40,14 @@ log "Data ready."
 DATE_TAG=$(date -u +%b%d | tr '[:upper:]' '[:lower:]')
 BRANCH="autotrader/${DATE_TAG}"
 
+HARNESS_BRANCH="harness"
+
 if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
     log "Branch $BRANCH exists — checking out."
     git checkout "$BRANCH" >> "$LOG_FILE" 2>&1
 else
-    log "Creating branch $BRANCH from current HEAD."
-    git checkout -b "$BRANCH" >> "$LOG_FILE" 2>&1
+    log "Creating branch $BRANCH from $HARNESS_BRANCH."
+    git checkout -b "$BRANCH" "$HARNESS_BRANCH" >> "$LOG_FILE" 2>&1
 fi
 
 if [ ! -f results.tsv ]; then
