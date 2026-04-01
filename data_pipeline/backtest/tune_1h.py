@@ -29,6 +29,7 @@ import json
 import argparse
 import random
 from pathlib import Path
+from typing import Any
 import numpy as np
 import pandas as pd
 
@@ -600,7 +601,7 @@ def run_sweep_per_symbol(
 
     _pool = get_pool()
     if _pool is not None and n_workers > 1:
-        from concurrent.futures import as_completed
+        from concurrent.futures import Future, as_completed
 
         tasks = []
         for symbol in symbols:
@@ -608,7 +609,7 @@ def run_sweep_per_symbol(
             tasks.append((symbol, parquet_path, combos, subsample_factor))
 
         try:
-            futures = {
+            futures: dict[Future[Any], str] = {
                 _pool.submit(_symbol_sweep_worker, task): task[0] for task in tasks
             }
             for future in as_completed(
@@ -1297,8 +1298,8 @@ def main():
     parser.add_argument(
         "--skip-symbols",
         type=str,
-        default="HYPE",
-        help="Comma-separated symbols to skip (default=HYPE, which had 0 valid results)",
+        default="",
+        help="Comma-separated symbols to skip (default: none)",
     )
     args = parser.parse_args()
 
