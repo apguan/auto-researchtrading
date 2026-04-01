@@ -704,3 +704,4 @@
 2026-04-01 13:13:41,995 [INFO] Random search improved: 13.02 -> 13.03
 2026-04-01 13:13:41,995 [INFO] Adaptive multi-parameter grid
 2026-04-01 13:13:41,995 [INFO] Grid: 150 combos over 4 params
+2026-04-01 13:41:55,490 [INFO] Pool shut down — running walk-forward

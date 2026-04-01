@@ -20,9 +20,9 @@ Usage:
 
 import sys
 import os
+import re
 import time
 import json
-import math
 import logging
 import argparse
 import subprocess
@@ -74,7 +74,6 @@ from data_pipeline.backtest.tune_1h import (
 from data_pipeline.pool import optimal_worker_count
 
 LOG_DIR = _pipeline_root / "logs"
-DATA_DIR = _pipeline_root / "backtest_data" / "1h_candles"
 STRATEGY_PATH = _repo_root / "strategy.py"
 
 # Deep copy of original sweep definitions (we'll mutate copies)
@@ -181,8 +180,13 @@ def adapt_sweep_ranges(
     shrink by shrink_factor, but keep at least exploration_width of original range.
     For list-based sweeps (paired params): keep as-is.
     """
+    # Build name-keyed lookup into original sweeps
+    orig_by_name: dict[str, Any] = {
+        name: grid for name, grid in original_sweeps
+    }
+
     adapted = []
-    for idx, (name, grid) in enumerate(current_sweeps):
+    for name, grid in current_sweeps:
         if not isinstance(grid, dict):
             # Paired sweep — keep as-is
             adapted.append((name, grid))
@@ -197,8 +201,9 @@ def adapt_sweep_ranges(
 
             # Get original range for reference
             orig_values = values
-            if idx < len(original_sweeps) and isinstance(original_sweeps[idx][1], dict):
-                orig_values = original_sweeps[idx][1].get(param, values)
+            orig_grid = orig_by_name.get(name)
+            if orig_grid is not None and isinstance(orig_grid, dict):
+                orig_values = orig_grid.get(param, values)
 
             orig_min = min(orig_values)
             orig_max = max(orig_values)
@@ -443,17 +448,16 @@ def run_tuning_iteration(
     stepwise_score = 0.0
     if best_overall_result is not None and all_phase_results:
         selected_score = best_overall_result["_score"]
-        logger.info("Forward stepwise accumulation (on %s data)", "subsampled" if subsample > 1 else "full")
+        logger.info("Forward stepwise accumulation (on full data)")
         stepwise_params, stepwise_score = forward_stepwise_accumulate(
-            screen_data, all_phase_results, initial_params=best_params_accumulator
+            full_data, all_phase_results, initial_params=best_params_accumulator
         )
         if best_overall_result and stepwise_score < best_overall_result["_score"]:
             logger.info(
-                "Stepwise %.2f < best single %.2f — using best single",
+                "Stepwise %.2f < best single %.2f — merging single winner into accumulator",
                 stepwise_score,
                 best_overall_result["_score"],
             )
-            best_params_accumulator = DEFAULTS.copy()
             best_params_accumulator.update(best_overall_result["params"])
             selected_score = best_overall_result["_score"]
         else:
@@ -466,9 +470,9 @@ def run_tuning_iteration(
     # ---- Random search ----
     if all_phase_results:
         n_random = 20 if subsample > 1 else 60
-        logger.info("Random search phase (%d iterations, on %s data)", n_random, "subsampled" if subsample > 1 else "full")
+        logger.info("Random search phase (%d iterations, on full data)", n_random)
         random_params, random_score = random_search_phase(
-            screen_data, best_params_accumulator, all_phase_results, n_iterations=n_random
+            full_data, best_params_accumulator, all_phase_results, n_iterations=n_random
         )
         if random_score > selected_score:
             logger.info(
@@ -562,6 +566,8 @@ def git_commit(message: str, dry_run: bool = False) -> bool:
                 "--",
                 "data_pipeline/auto_tune_1h.py",
                 "data_pipeline/logs/",
+                "data_pipeline/tuning_results/",
+                "strategy.py",
             ],
             cwd=str(_repo_root),
             capture_output=True,
@@ -612,8 +618,6 @@ def update_strategy_py(best_params: dict, dry_run: bool = False) -> bool:
         if DEFAULTS[param] == new_val:
             continue
 
-        # Find line like "PARAM_NAME = old_value"
-        import re
         pattern = rf"^{param}\s*=\s*.+$"
         match = re.search(pattern, content, re.MULTILINE)
         if match:
@@ -636,7 +640,25 @@ def update_strategy_py(best_params: dict, dry_run: bool = False) -> bool:
         return True
 
     STRATEGY_PATH.write_text(content, encoding="utf-8")
-    logger.info("Updated strategy.py with %d param changes", len(changes))
+
+    verify = STRATEGY_PATH.read_text(encoding="utf-8")
+    verified = {}
+    for param, expected_val in changes.items():
+        m = re.search(rf"^{param}\s*=\s*(.+)$", verify, re.MULTILINE)
+        if m:
+            actual = m.group(1).strip()
+            verified[param] = (str(expected_val), actual)
+            if actual != str(expected_val):
+                logger.error(
+                    "VERIFICATION FAILED for %s: expected %s, got %s — reverting strategy.py",
+                    param,
+                    expected_val,
+                    actual,
+                )
+                STRATEGY_PATH.write_text(original_content, encoding="utf-8")
+                return False
+
+    logger.info("Updated strategy.py with %d param changes (all verified)", len(changes))
     return True
 
 
@@ -812,12 +834,6 @@ def main():
         help="Update strategy.py with final best params",
     )
     parser.add_argument(
-        "--no-db",
-        action="store_true",
-        default=False,
-        help="Skip Supabase persistence",
-    )
-    parser.add_argument(
         "--skip-symbols",
         type=str,
         default="",
@@ -947,27 +963,44 @@ def main():
         else:
             logger.info("Validation deferred for iteration %d", iteration)
 
-        # Run tuning
-        (
-            best_params,
-            best_score,
-            all_results,
-            wf_result,
-            stab_result,
-        ) = run_tuning_iteration(
-            full_data=full_data,
-            single_sweeps=current_single,
-            secondary_sweeps=current_secondary,
-            best_params_accumulator=best_params_accumulator,
-            workers=args.workers,
-            subsample=args.subsample,
-            revalidate_top=args.revalidate_top,
-            validation_folds=args.validation_folds,
-            stability_mode=args.stability_mode,
-            stability_subsample=args.stability_subsample,
-            validate=validate_this_iteration,
-            dry_run=args.dry_run,
-        )
+        # Run tuning (wrapped for resilience — survive phase crashes)
+        try:
+            (
+                best_params,
+                best_score,
+                all_results,
+                wf_result,
+                stab_result,
+            ) = run_tuning_iteration(
+                full_data=full_data,
+                single_sweeps=current_single,
+                secondary_sweeps=current_secondary,
+                best_params_accumulator=best_params_accumulator,
+                workers=args.workers,
+                subsample=args.subsample,
+                revalidate_top=args.revalidate_top,
+                validation_folds=args.validation_folds,
+                stability_mode=args.stability_mode,
+                stability_subsample=args.stability_subsample,
+                validate=validate_this_iteration,
+                dry_run=args.dry_run,
+            )
+        except Exception as exc:
+            iter_elapsed = time.time() - t_iter_start
+            logger.error(
+                "Iteration %d CRASHED after %.0fs: %s — skipping, continuing with previous best",
+                iteration,
+                iter_elapsed,
+                exc,
+            )
+            git_commit(
+                f"tune_1h: iteration {iteration} CRASHED — {exc}",
+                dry_run=args.dry_run,
+            )
+            # Reset pool in case it's in a bad state
+            pool_shutdown()
+            reset_params()
+            continue
 
         iter_elapsed = time.time() - t_iter_start
 
@@ -1071,9 +1104,7 @@ def main():
         logger.info("Updating strategy.py with best params...")
         update_strategy_py(best_params, dry_run=False)
         git_commit(
-            f"tune_1h: apply final best params (score={best_params_accumulator.get('_score', best_score):.2f})"
-            if False
-            else f"tune_1h: apply final best params to strategy.py",
+            f"tune_1h: apply final best params to strategy.py",
             dry_run=False,
         )
     elif args.update_strategy and args.dry_run:
