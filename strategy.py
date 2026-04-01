@@ -390,6 +390,8 @@ def save_experiment_to_db(
     win_rate_pct: float,
     profit_factor: float,
     description: str = "",
+    status: str = "PASS",
+    is_best: bool = True,
 ) -> bool:
     import os
     import psycopg2
@@ -406,19 +408,21 @@ def save_experiment_to_db(
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
 
-        cur.execute(
-            "UPDATE param_snapshots SET is_active = FALSE "
-            "WHERE is_active = TRUE AND period = '1h'"
-        )
+        if is_best:
+            cur.execute(
+                "UPDATE param_snapshots SET is_active = FALSE "
+                "WHERE is_active = TRUE AND period = '1h'"
+            )
 
         param_cols = ", ".join(ACTIVE_PARAMS)
         all_cols = (
             "run_date, sweep_name, period, symbol, is_active, is_best, "
             "sharpe, total_return_pct, max_drawdown_pct, "
             "profit_factor, win_rate_pct, num_trades, ret_dd_ratio, "
+            "score, status, description, "
             + param_cols
         )
-        all_placeholders = ", ".join(["%s"] * (13 + len(ACTIVE_PARAMS)))
+        all_placeholders = ", ".join(["%s"] * (15 + len(ACTIVE_PARAMS)))
 
         ret_dd_ratio = (
             total_return_pct / max_drawdown_pct
@@ -427,11 +431,11 @@ def save_experiment_to_db(
 
         values = [
             datetime.now(timezone.utc).isoformat(),
-            description or "autoresearch",
+            "autoresearch",
             "1h",
             "ALL",
-            True,
-            True,
+            is_best,
+            is_best,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -439,6 +443,9 @@ def save_experiment_to_db(
             win_rate_pct,
             num_trades,
             ret_dd_ratio,
+            score,
+            status,
+            description,
         ]
         for c in ACTIVE_PARAMS:
             values.append(float(params[c]))
