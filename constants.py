@@ -25,7 +25,7 @@ INTERVAL_SYMBOLS: dict[str, list[str]] = {
     "1m": ["BTC", "ETH", "SOL", "XRP","HYPE"],
 }
 
-BENCHMARK_SYMBOLS = ["BTC", "ETH", "SOL"]
+BENCHMARK_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
 
 DEFAULT_SYMBOL_WEIGHT = 0.25
 
