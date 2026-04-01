@@ -101,8 +101,12 @@ class Strategy:
     def _calc_vol(self, closes, lookback):
         if len(closes) < lookback:
             return TARGET_VOL
-        log_rets = np.diff(np.log(closes[-lookback:]))
-        return max(np.std(log_rets), 1e-6)
+        valid = closes[-lookback:]
+        if np.any(valid <= 0):
+            return TARGET_VOL
+        log_rets = np.diff(np.log(valid))
+        vol = np.std(log_rets)
+        return max(vol, 1e-6) if np.isfinite(vol) else TARGET_VOL
 
     def _calc_correlation(self, bar_data):
         if "BTC" not in bar_data or "ETH" not in bar_data:
@@ -182,13 +186,16 @@ class Strategy:
             closes = bd.history["close"].values
             mid = bd.close
 
+            if mid <= 0 or np.any(closes <= 0):
+                continue
+
             realized_vol = self._calc_vol(closes, VOL_LOOKBACK)
             vol_ratio = realized_vol / TARGET_VOL
             dyn_threshold = BASE_THRESHOLD * (0.3 + vol_ratio * 0.7)
             dyn_threshold = max(0.005, min(0.020, dyn_threshold))
 
-            ret_vshort = (closes[-1] - closes[-SHORT_WINDOW]) / closes[-SHORT_WINDOW]
-            ret_short = (closes[-1] - closes[-MED_WINDOW]) / closes[-MED_WINDOW]
+            ret_vshort = (closes[-1] - closes[-SHORT_WINDOW]) / max(closes[-SHORT_WINDOW], 1e-10)
+            ret_short = (closes[-1] - closes[-MED_WINDOW]) / max(closes[-MED_WINDOW], 1e-10)
             mom_bull = ret_short > dyn_threshold
             mom_bear = ret_short < -dyn_threshold
             vshort_bull = ret_vshort > dyn_threshold * 0.7
@@ -383,6 +390,8 @@ def save_experiment_to_db(
     win_rate_pct: float,
     profit_factor: float,
     description: str = "",
+    status: str = "PASS",
+    is_best: bool = True,
 ) -> bool:
     import os
     import psycopg2
@@ -399,19 +408,21 @@ def save_experiment_to_db(
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
 
-        cur.execute(
-            "UPDATE param_snapshots SET is_active = FALSE "
-            "WHERE is_active = TRUE AND period = '1h'"
-        )
+        if is_best:
+            cur.execute(
+                "UPDATE param_snapshots SET is_active = FALSE "
+                "WHERE is_active = TRUE AND period = '1h'"
+            )
 
         param_cols = ", ".join(ACTIVE_PARAMS)
         all_cols = (
             "run_date, sweep_name, period, symbol, is_active, is_best, "
             "sharpe, total_return_pct, max_drawdown_pct, "
             "profit_factor, win_rate_pct, num_trades, ret_dd_ratio, "
+            "score, status, description, "
             + param_cols
         )
-        all_placeholders = ", ".join(["%s"] * (13 + len(ACTIVE_PARAMS)))
+        all_placeholders = ", ".join(["%s"] * (15 + len(ACTIVE_PARAMS)))
 
         ret_dd_ratio = (
             total_return_pct / max_drawdown_pct
@@ -420,11 +431,11 @@ def save_experiment_to_db(
 
         values = [
             datetime.now(timezone.utc).isoformat(),
-            description or "autoresearch",
+            "autoresearch",
             "1h",
             "ALL",
-            True,
-            True,
+            is_best,
+            is_best,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -432,6 +443,9 @@ def save_experiment_to_db(
             win_rate_pct,
             num_trades,
             ret_dd_ratio,
+            score,
+            status,
+            description,
         ]
         for c in ACTIVE_PARAMS:
             values.append(float(params[c]))

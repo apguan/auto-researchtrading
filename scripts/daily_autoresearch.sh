@@ -75,15 +75,16 @@ Rules:
 - Only edit strategy.py
 - Run 'uv run backtest.py > run.log 2>&1' and parse results from run.log
 - After each experiment, record in results.tsv
-- If score IMPROVES (higher than best so far): keep the commit AND save to DB by running: uv run python scripts/save_to_db.py run.log '<description of change>'
-- If score is equal or worse: git reset --hard HEAD~1
+- ALWAYS save to DB (both wins and losses):
+  - If score IMPROVES: keep the commit, then: uv run python scripts/save_to_db.py run.log '<description>' PASS
+  - If score is equal or worse: save first, then revert: uv run python scripts/save_to_db.py run.log '<description>' FAIL && git reset --hard HEAD~1
 - Do NOT stop until you have completed $BATCH_COUNT experiments
 
 Run $BATCH_COUNT experiments now. Do not ask questions. Be autonomous."
         opencode run "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
     else
         PROMPT="Continue the autoresearch loop. Run $BATCH_COUNT more experiments.
-Same rules as before — save to DB after each improvement via: uv run python scripts/save_to_db.py run.log '<description>'
+Same rules as before — save EVERY experiment to DB (PASS or FAIL), then revert failures.
 Do not stop until $BATCH_COUNT experiments are done."
         opencode run -c "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
     fi

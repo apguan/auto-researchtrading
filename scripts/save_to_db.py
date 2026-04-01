@@ -3,7 +3,8 @@
 
 Usage:
     python scripts/save_to_db.py run.log "exp1: widened RSI bands"
-    python scripts/save_to_db.py run.log                          # no description
+    python scripts/save_to_db.py run.log "exp1: widened RSI bands" PASS
+    python scripts/save_to_db.py run.log "exp1: widened RSI bands" FAIL
 """
 
 import re
@@ -40,16 +41,18 @@ def parse_run_log(path: str) -> dict:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python scripts/save_to_db.py <run.log> [description]", file=sys.stderr)
+        print("Usage: python scripts/save_to_db.py <run.log> [description] [PASS|FAIL]", file=sys.stderr)
         sys.exit(1)
 
     log_path = sys.argv[1]
     description = sys.argv[2] if len(sys.argv) > 2 else ""
+    status = sys.argv[3] if len(sys.argv) > 3 else "PASS"
+    is_best = status == "PASS"
 
     metrics = parse_run_log(log_path)
     print(f"Parsed: {metrics}", file=sys.stderr)
 
-    from strategy import save_experiment_to_db  # Ensure strategy.py exists in the same directory or is in PYTHONPATH
+    from strategy import save_experiment_to_db
 
     ok = save_experiment_to_db(
         score=metrics["score"],
@@ -60,6 +63,8 @@ def main():
         win_rate_pct=metrics["win_rate_pct"],
         profit_factor=metrics["profit_factor"],
         description=description,
+        status=status,
+        is_best=is_best,
     )
 
     if ok:
