@@ -21,16 +21,16 @@ LONG_WINDOW = 36
 EMA_FAST = 7
 EMA_SLOW = 26
 RSI_PERIOD = 8
-RSI_BULL = 50
-RSI_BEAR = 50
-RSI_OVERBOUGHT = 69
-RSI_OVERSOLD = 31
+RSI_BULL = 48
+RSI_BEAR = 52
+RSI_OVERBOUGHT = 75
+RSI_OVERSOLD = 25
 
 MACD_FAST = 14
 MACD_SLOW = 23
 MACD_SIGNAL = 9
 
-BB_PERIOD = 7
+BB_PERIOD = 5
 
 FUNDING_LOOKBACK = 24
 FUNDING_BOOST = 0.0
@@ -51,7 +51,7 @@ HIGH_CORR_THRESHOLD = 99.0
 DD_REDUCE_THRESHOLD = 99.0
 DD_REDUCE_SCALE = 0.5
 
-COOLDOWN_BARS = 2
+COOLDOWN_BARS = 3
 MIN_VOTES = 4  # out of 6 now
 
 
@@ -347,3 +347,139 @@ class Strategy:
                     self.pyramided[symbol] = False
 
         return signals
+
+
+ACTIVE_PARAMS = (
+    "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
+    "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
+    "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
+    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK", "FUNDING_BOOST",
+    "BASE_POSITION_PCT", "VOL_LOOKBACK", "TARGET_VOL", "ATR_LOOKBACK",
+    "ATR_STOP_MULT", "TAKE_PROFIT_PCT", "BASE_THRESHOLD",
+    "BTC_OPPOSE_THRESHOLD", "PYRAMID_THRESHOLD", "PYRAMID_SIZE",
+    "CORR_LOOKBACK", "HIGH_CORR_THRESHOLD", "DD_REDUCE_THRESHOLD",
+    "DD_REDUCE_SCALE", "COOLDOWN_BARS", "MIN_VOTES",
+)
+
+INT_PARAMS = {
+    "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
+    "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
+    "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
+    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK",
+    "VOL_LOOKBACK", "ATR_LOOKBACK", "COOLDOWN_BARS", "MIN_VOTES",
+}
+
+
+def _get_current_params() -> dict[str, int | float]:
+    return {k: globals()[k] for k in ACTIVE_PARAMS}
+
+
+def save_experiment_to_db(
+    score: float,
+    sharpe: float,
+    total_return_pct: float,
+    max_drawdown_pct: float,
+    num_trades: int,
+    win_rate_pct: float,
+    profit_factor: float,
+    description: str = "",
+) -> bool:
+    import os
+    import psycopg2
+    from datetime import datetime, timezone
+
+    db_url = os.environ.get("SUPABASE_DB_URL", "")
+    if not db_url:
+        return False
+
+    params = _get_current_params()
+
+    conn = None
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+
+        cur.execute(
+            "UPDATE param_snapshots SET is_active = FALSE "
+            "WHERE is_active = TRUE AND period = '1h'"
+        )
+
+        param_cols = ", ".join(ACTIVE_PARAMS)
+        all_cols = (
+            "run_date, sweep_name, period, symbol, is_active, is_best, "
+            "sharpe, total_return_pct, max_drawdown_pct, "
+            "profit_factor, win_rate_pct, num_trades, ret_dd_ratio, "
+            + param_cols
+        )
+        all_placeholders = ", ".join(["%s"] * (13 + len(ACTIVE_PARAMS)))
+
+        ret_dd_ratio = (
+            total_return_pct / max_drawdown_pct
+            if max_drawdown_pct > 0 else 0.0
+        )
+
+        values = [
+            datetime.now(timezone.utc).isoformat(),
+            description or "autoresearch",
+            "1h",
+            "ALL",
+            True,
+            True,
+            sharpe,
+            total_return_pct,
+            max_drawdown_pct,
+            profit_factor,
+            win_rate_pct,
+            num_trades,
+            ret_dd_ratio,
+        ]
+        for c in ACTIVE_PARAMS:
+            values.append(float(params[c]))
+
+        cur.execute(
+            f"INSERT INTO param_snapshots ({all_cols}) VALUES ({all_placeholders})",
+            values,
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def load_params_from_db() -> bool:
+    import os
+    import psycopg2
+
+    db_url = os.environ.get("SUPABASE_DB_URL", "")
+    if not db_url:
+        return False
+
+    try:
+        with psycopg2.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                select_cols = ", ".join(ACTIVE_PARAMS)
+                cur.execute(
+                    f"SELECT {select_cols} "
+                    "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
+                    "ORDER BY run_date DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False
+
+                for name, val in zip(ACTIVE_PARAMS, row):
+                    if name in INT_PARAMS:
+                        globals()[name] = int(val)
+                    else:
+                        globals()[name] = float(val)
+
+                print(f"Loaded 1h params from DB")
+                return True
+    except Exception:
+        return False
+
+
+load_params_from_db()

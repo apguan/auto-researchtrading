@@ -887,3 +887,413 @@ BEST: RSI_OVERBOUGHT=80, RSI_OVERSOLD=20 -> Score=11.54, Sharpe=11.54, DD=1.26%,
 13:13:41 [INFO] Adaptive multi-parameter grid
 13:13:41 [INFO] Grid: 150 combos over 4 params
   Running 150 combinations for ADAPTIVE_MULTI (4 workers)...
+
+  Completed in 773.8s (5.2s/combo)
+  Re-validating top 10 on full data...
+    [1] subsampled=18.27 -> full=7.67  Ret=+10.6% DD=0.5%
+    [2] subsampled=18.09 -> full=11.51  Ret=+13.1% DD=0.3%
+    [3] subsampled=17.93 -> full=6.94  Ret=+8.6% DD=0.5%
+    [4] subsampled=17.65 -> full=11.55  Ret=+12.0% DD=0.3%
+    [5] subsampled=17.44 -> full=5.63  Ret=+5.9% DD=0.3%
+    [6] subsampled=17.33 -> full=6.20  Ret=+10.0% DD=0.5%
+    [7] subsampled=17.19 -> full=9.94  Ret=+8.9% DD=0.2%
+    [8] subsampled=17.13 -> full=7.40  Ret=+10.3% DD=0.4%
+    [9] subsampled=16.98 -> full=7.78  Ret=+6.7% DD=0.2%
+    [10] subsampled=16.90 -> full=12.23  Ret=+11.4% DD=0.1%
+
+==============================================================================================================
+SWEEP: ADAPTIVE_MULTI (full)
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +11.43     0.13    12.23     4.46  59.9%    7657 $641,451,654    12.23 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=28, BASE_POSITION_PCT=0.024
+    +12.03     0.29    11.55     4.75  60.7%    7630 $637,553,372    11.55 RSI_PERIOD=8, RSI_OVERBOUGHT=72, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+    +13.07     0.35    11.51     7.22  67.6%    6202 $552,927,563    11.51 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+     +8.85     0.22     9.94     2.99  53.0%    8802 $696,187,255     9.94 RSI_PERIOD=8, RSI_OVERBOUGHT=65, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+     +6.69     0.20     7.78     2.47  51.0%    9117 $713,438,704     7.78 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=36, BASE_POSITION_PCT=0.024
+    +10.62     0.52     7.67     6.08  68.1%    5140 $477,088,587     7.67 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+    +10.34     0.37     7.40     5.14  65.8%    5181 $480,581,046     7.40 RSI_PERIOD=8, RSI_OVERBOUGHT=88, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+     +8.65     0.51     6.94     3.51  58.1%    6568 $558,716,428     6.94 RSI_PERIOD=8, RSI_OVERBOUGHT=72, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+     +9.99     0.53     6.20     6.97  71.4%    4117 $411,250,091     6.20 RSI_PERIOD=8, RSI_OVERBOUGHT=88, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+     +5.85     0.29     5.63     2.33  49.8%    7736 $617,274,127     5.63 RSI_PERIOD=8, RSI_OVERBOUGHT=65, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+
+BEST: RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=28, BASE_POSITION_PCT=0.024 -> Score=12.23, Sharpe=12.23, DD=0.13%, PF=4.46, WR=59.9%
+
+13:41:55 [INFO] Pool shut down — running walk-forward
+
+==========================================================================================
+WALK-FORWARD VALIDATION
+==========================================================================================
+Params: SHORT_WINDOW=6, MED_WINDOW=8, MED2_WINDOW=24, LONG_WINDOW=36, EMA_FAST=7, EMA_SLOW=26, RSI_PERIOD=8, BB_PERIOD=7, MACD_FAST=14, MACD_SLOW=23, MACD_SIGNAL=9, ATR_LOOKBACK=30, ATR_STOP_MULT=7.0, VOL_LOOKBACK=36, BASE_POSITION_PCT=0.024, COOLDOWN_BARS=4, FUNDING_LOOKBACK=24, CORR_LOOKBACK=72, FUNDING_BOOST=0.0, RSI_BULL=50, RSI_BEAR=55, RSI_OVERBOUGHT=80, RSI_OVERSOLD=28, MIN_VOTES=3, BASE_THRESHOLD=0.01, TARGET_VOL=0.015, PYRAMID_THRESHOLD=0.015, PYRAMID_SIZE=0.0, BTC_OPPOSE_THRESHOLD=-99.0, HIGH_CORR_THRESHOLD=99.0, DD_REDUCE_THRESHOLD=99.0, DD_REDUCE_SCALE=0.5, TAKE_PROFIT_PCT=99.0
+Folds: 4
+
+  Fold   Train%   TrBars   TeBars    TrRet%    TeRet%    TrDD%    TeDD%   TrScore   TeScore   Degrad%
+--------------------------------------------------------------------------------------------------------------
+     1      44%    11006    14010     +3.96     +4.71     0.21     0.17      8.24      8.93     -8.4%
+     2      58%    14511    10505     +4.82     +3.78     0.21     0.17      7.96      9.22    -15.8%
+     3      72%    18011     7005     +5.65     +2.71     0.21     0.18      7.63      9.06    -18.7%
+     4      86%    21516     3500     +7.48     +1.09     0.21     0.09      8.31      9.14    -10.0%
+--------------------------------------------------------------------------------------------------------------
+   AVG                                          +3.07              0.15                9.09    -13.2%
+
+  Consistent (>60% positive folds): True  |  Verdict: PASS
+  Results saved to: /Users/apguan/Desktop/auto-researchtrading/data_pipeline/tuning_results/tune_1h_20260401_134743.json
+
+==========================================================================================
+AUTO TUNE 1H — Iteration 3/8
+==========================================================================================
+Best score:     11.57 (+0.0% from iter 2)
+Walk-forward:   PASS
+Stability:      N/A
+Params changed: ATR_LOOKBACK=24->30, ATR_STOP_MULT=5.5->7.0, BASE_POSITION_PCT=0.088->0.024, BASE_THRESHOLD=0.012->0.01, COOLDOWN_BARS=2->4, MED_WINDOW=12->8, MIN_VOTES=4->3, RSI_BEAR=50->55, RSI_OVERBOUGHT=69->80, RSI_OVERSOLD=31->28
+Wall time:      4381s
+==========================================================================================
+13:47:43 [INFO] Committed: tune_1h: iteration 3 — score=11.57 (PASS)
+13:47:43 [INFO] Adapting sweep ranges for iteration 4...
+13:47:43 [INFO] Adapted sweep ranges:
+13:47:43 [INFO]   RSI_PERIOD: [4, 6, 7, 8, 9, 10, 12]
+13:47:43 [INFO]   ATR_STOP_MULT: [5.25, 5.833333, 6.416667, 7.0, 7.583333, 8.166667, 8.75]
+13:47:43 [INFO]   COOLDOWN_BARS: [1, 3, 4, 5, 7]
+13:47:43 [INFO]   BASE_POSITION_PCT: [-0.046, -0.022667, 0.000667, 0.024, 0.047333, 0.070667, 0.094]
+13:47:43 [INFO]   MIN_VOTES: [2, 3, 4]
+13:47:43 [INFO]   BASE_THRESHOLD: [0.00625, 0.0075, 0.00875, 0.01, 0.01125, 0.0125, 0.01375]
+13:47:43 [INFO]   SHORT_WINDOW: [4, 5, 6, 7, 8]
+13:47:43 [INFO]   MED_WINDOW: [6, 7, 8, 9, 10]
+13:47:43 [INFO]   BB_PERIOD: [5, 6, 7, 8, 9]
+13:47:43 [INFO]   ATR_LOOKBACK: [21, 24, 27, 30, 33, 36, 39]
+13:47:43 [INFO]   TARGET_VOL: [0.01075, 0.012167, 0.013583, 0.015, 0.016417, 0.017833, 0.01925]
+13:47:43 [INFO] 
+##########################################################################################
+13:47:43 [INFO] # ITERATION 4/8
+13:47:43 [INFO] ##########################################################################################
+13:47:43 [INFO] Current sweep ranges:
+13:47:43 [INFO]   RSI_PERIOD: [4, 6, 7, 8, 9, 10, 12]
+13:47:43 [INFO]   ATR_STOP_MULT: [5.25, 5.833333, 6.416667, 7.0, 7.583333, 8.166667, 8.75]
+13:47:43 [INFO]   COOLDOWN_BARS: [1, 3, 4, 5, 7]
+13:47:43 [INFO]   BASE_POSITION_PCT: [-0.046, -0.022667, 0.000667, 0.024, 0.047333, 0.070667, 0.094]
+13:47:43 [INFO]   MIN_VOTES: [2, 3, 4]
+13:47:43 [INFO]   BASE_THRESHOLD: [0.00625, 0.0075, 0.00875, 0.01, 0.01125, 0.0125, 0.01375]
+13:47:43 [INFO]   SHORT_WINDOW: [4, 5, 6, 7, 8]
+13:47:43 [INFO]   MED_WINDOW: [6, 7, 8, 9, 10]
+13:47:43 [INFO]   RSI_BULL_BEAR: 6 combos
+13:47:43 [INFO]   BB_PERIOD: [5, 6, 7, 8, 9]
+13:47:43 [INFO]   ATR_LOOKBACK: [21, 24, 27, 30, 33, 36, 39]
+13:47:43 [INFO]   TARGET_VOL: [0.01075, 0.012167, 0.013583, 0.015, 0.016417, 0.017833, 0.01925]
+13:47:43 [INFO]   RSI_OB_OS: 8 combos
+13:47:43 [INFO] Phase 1: Single-parameter sweeps (8 sweeps)
+  Running 7 combinations for RSI_PERIOD (4 workers)...
+
+  Completed in 40.6s (5.8s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.60 -> full=10.22  Ret=+33.2% DD=0.7%
+
+==============================================================================================================
+SWEEP: RSI_PERIOD
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +33.17     0.67    10.28     2.77  52.8%   10960 $3,374,809,393    10.22 RSI_PERIOD=4
+
+BEST: RSI_PERIOD=4 -> Score=10.22, Sharpe=10.28, DD=0.67%, PF=2.77, WR=52.8%
+
+  Running 7 combinations for ATR_STOP_MULT (4 workers)...
+
+  Completed in 40.2s (5.7s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.58 -> full=9.97  Ret=+33.5% DD=0.7%
+
+==============================================================================================================
+SWEEP: ATR_STOP_MULT
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +33.53     0.70    10.00     2.68  53.0%   10180 $3,188,270,207     9.97 ATR_STOP_MULT=5.833333
+
+BEST: ATR_STOP_MULT=5.833333 -> Score=9.97, Sharpe=10.00, DD=0.70%, PF=2.68, WR=53.0%
+
+  Running 5 combinations for COOLDOWN_BARS (4 workers)...
+
+  Completed in 39.6s (7.9s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.58 -> full=11.06  Ret=+34.9% DD=0.4%
+
+==============================================================================================================
+SWEEP: COOLDOWN_BARS
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +34.86     0.45    11.06     3.27  56.3%    8489 $2,695,815,369    11.06 COOLDOWN_BARS=3
+
+BEST: COOLDOWN_BARS=3 -> Score=11.06, Sharpe=11.06, DD=0.45%, PF=3.27, WR=56.3%
+
+  Running 7 combinations for BASE_POSITION_PCT (4 workers)...
+  [SKIP] {'BASE_POSITION_PCT': -0.046}
+  [SKIP] {'BASE_POSITION_PCT': -0.022667}
+
+  Completed in 40.2s (5.7s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.58 -> full=9.93  Ret=+36.2% DD=0.8%
+
+==============================================================================================================
+SWEEP: BASE_POSITION_PCT
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +36.18     0.75    10.00     2.68  53.0%   10180 $3,440,109,627     9.93 BASE_POSITION_PCT=0.094
+
+BEST: BASE_POSITION_PCT=0.094 -> Score=9.93, Sharpe=10.00, DD=0.75%, PF=2.68, WR=53.0%
+
+  Running 3 combinations for MIN_VOTES (4 workers)...
+
+  Completed in 20.5s (6.8s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=19.34 -> full=8.20  Ret=+30.5% DD=0.9%
+
+==============================================================================================================
+SWEEP: MIN_VOTES
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +30.50     0.90     8.44     2.83  54.0%   12712 $4,453,813,806     8.20 MIN_VOTES=3
+
+BEST: MIN_VOTES=3 -> Score=8.20, Sharpe=8.44, DD=0.90%, PF=2.83, WR=54.0%
+
+  Running 7 combinations for BASE_THRESHOLD (4 workers)...
+
+  Completed in 41.0s (5.9s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=18.12 -> full=9.85  Ret=+33.4% DD=0.7%
+
+==============================================================================================================
+SWEEP: BASE_THRESHOLD
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +33.39     0.75     9.91     2.69  53.0%   10463 $3,323,912,098     9.85 BASE_THRESHOLD=0.00625
+
+BEST: BASE_THRESHOLD=0.00625 -> Score=9.85, Sharpe=9.91, DD=0.75%, PF=2.69, WR=53.0%
+
+  Running 5 combinations for SHORT_WINDOW (4 workers)...
+
+  Completed in 40.1s (8.0s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.58 -> full=9.97  Ret=+33.5% DD=0.7%
+
+==============================================================================================================
+SWEEP: SHORT_WINDOW
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +33.53     0.70    10.00     2.68  53.0%   10180 $3,188,270,207     9.97 SHORT_WINDOW=6
+
+BEST: SHORT_WINDOW=6 -> Score=9.97, Sharpe=10.00, DD=0.70%, PF=2.68, WR=53.0%
+
+  Running 5 combinations for MED_WINDOW (4 workers)...
+
+  Completed in 41.1s (8.2s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.04 -> full=9.29  Ret=+30.1% DD=0.7%
+
+==============================================================================================================
+SWEEP: MED_WINDOW
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +30.12     0.70     9.32     2.51  51.5%   10301 $3,172,293,778     9.29 MED_WINDOW=9
+
+BEST: MED_WINDOW=9 -> Score=9.29, Sharpe=9.32, DD=0.70%, PF=2.51, WR=51.5%
+
+14:05:28 [INFO] Phase 2: Secondary sweeps (5 sweeps)
+  Running 6 combinations for RSI_BULL_BEAR (4 workers)...
+
+  Completed in 40.7s (6.8s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.67 -> full=10.06  Ret=+34.1% DD=0.8%
+
+==============================================================================================================
+SWEEP: RSI_BULL_BEAR
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +34.08     0.85    10.11     2.72  53.0%   10418 $3,316,597,465    10.06 RSI_BULL=45, RSI_BEAR=55
+
+BEST: RSI_BULL=45, RSI_BEAR=55 -> Score=10.06, Sharpe=10.11, DD=0.85%, PF=2.72, WR=53.0%
+
+  Running 5 combinations for BB_PERIOD (4 workers)...
+
+  Completed in 40.3s (8.1s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.58 -> full=10.05  Ret=+33.6% DD=0.7%
+
+==============================================================================================================
+SWEEP: BB_PERIOD
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +33.64     0.70    10.08     2.69  53.2%   10178 $3,187,548,559    10.05 BB_PERIOD=8
+
+BEST: BB_PERIOD=8 -> Score=10.05, Sharpe=10.08, DD=0.70%, PF=2.69, WR=53.2%
+
+  Running 7 combinations for ATR_LOOKBACK (4 workers)...
+
+  Completed in 41.8s (6.0s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.58 -> full=9.97  Ret=+33.5% DD=0.7%
+
+==============================================================================================================
+SWEEP: ATR_LOOKBACK
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +33.53     0.70    10.00     2.68  53.0%   10180 $3,188,270,207     9.97 ATR_LOOKBACK=21
+
+BEST: ATR_LOOKBACK=21 -> Score=9.97, Sharpe=10.00, DD=0.70%, PF=2.68, WR=53.0%
+
+  Running 7 combinations for TARGET_VOL (4 workers)...
+
+  Completed in 40.5s (5.8s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=16.96 -> full=9.82  Ret=+32.9% DD=0.8%
+
+==============================================================================================================
+SWEEP: TARGET_VOL
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +32.92     0.76     9.86     2.66  52.9%   10277 $3,224,005,758     9.82 TARGET_VOL=0.01925
+
+BEST: TARGET_VOL=0.01925 -> Score=9.82, Sharpe=9.86, DD=0.76%, PF=2.66, WR=52.9%
+
+  Running 8 combinations for RSI_OB_OS (4 workers)...
+
+  Completed in 40.7s (5.1s/combo)
+  Re-validating top 1 on full data...
+    [1] subsampled=18.10 -> full=11.54  Ret=+56.7% DD=1.3%
+
+==============================================================================================================
+SWEEP: RSI_OB_OS
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +56.70     1.26    11.54     7.25  67.6%    6202 $2,401,823,956    11.54 RSI_OVERBOUGHT=80, RSI_OVERSOLD=20
+
+BEST: RSI_OVERBOUGHT=80, RSI_OVERSOLD=20 -> Score=11.54, Sharpe=11.54, DD=1.26%, PF=7.25, WR=67.6%
+
+14:16:43 [INFO] Forward stepwise accumulation (on subsampled data)
+  Baseline score: 7.43
+  Testing 12 non-default sweep results incrementally...
+  [REJECT] RSI_OVERBOUGHT=80, RSI_OVERSOLD=20 -> 6.18 (need > 7.43)
+  [REJECT] COOLDOWN_BARS=3 -> 7.04 (need > 7.43)
+  [ACCEPT] RSI_PERIOD=4 -> 7.43 -> 13.01
+  [REJECT] RSI_BULL=45, RSI_BEAR=55 -> 13.00 (need > 13.01)
+  [REJECT] BB_PERIOD=8 -> 12.54 (need > 13.01)
+  [REJECT] ATR_STOP_MULT=5.833333 -> 13.01 (need > 13.01)
+  [REJECT] ATR_LOOKBACK=21 -> 13.01 (need > 13.01)
+  [ACCEPT] BASE_POSITION_PCT=0.094 -> 13.01 -> 13.03
+  [REJECT] BASE_THRESHOLD=0.00625 -> 12.58 (need > 13.03)
+  [REJECT] TARGET_VOL=0.01925 -> 12.80 (need > 13.03)
+  [REJECT] MED_WINDOW=9 -> 12.72 (need > 13.03)
+  [REJECT] MIN_VOTES=3 -> 13.03 (need > 13.03)
+14:21:01 [INFO] Stepwise 13.03 — keeping combined params
+14:21:01 [INFO] Random search phase (20 iterations, on subsampled data)
+  Random search baseline score: 13.03
+  Testing 20 random multi-param combinations...
+    [7] IMPROVE 13.03 -> 13.07  {'RSI_OVERBOUGHT': 65}
+  Random search: 1/20 improved, final score: 13.07
+14:27:55 [INFO] Random search improved: 13.03 -> 13.07
+14:27:55 [INFO] Adaptive multi-parameter grid
+14:27:55 [INFO] Grid: 150 combos over 4 params
+  Running 150 combinations for ADAPTIVE_MULTI (4 workers)...
+
+  Completed in 768.1s (5.1s/combo)
+  Re-validating top 10 on full data...
+    [1] subsampled=18.27 -> full=7.67  Ret=+10.6% DD=0.5%
+    [2] subsampled=18.09 -> full=11.51  Ret=+13.1% DD=0.3%
+    [3] subsampled=17.94 -> full=7.18  Ret=+9.1% DD=0.5%
+    [4] subsampled=17.65 -> full=11.84  Ret=+12.5% DD=0.3%
+    [5] subsampled=17.44 -> full=5.63  Ret=+5.9% DD=0.3%
+    [6] subsampled=17.19 -> full=9.94  Ret=+8.9% DD=0.2%
+    [7] subsampled=16.98 -> full=7.78  Ret=+6.7% DD=0.2%
+    [8] subsampled=16.90 -> full=12.23  Ret=+11.4% DD=0.1%
+    [9] subsampled=16.64 -> full=13.02  Ret=+11.5% DD=0.1%
+    [10] subsampled=16.59 -> full=9.07  Ret=+7.6% DD=0.3%
+
+==============================================================================================================
+SWEEP: ADAPTIVE_MULTI (full)
+==============================================================================================================
+   Return%      DD%   Sharpe       PF    WR%  Trades   Turnover    Score Params
+--------------------------------------------------------------------------------------------------------------
+    +11.45     0.10    13.02     3.95  58.5%    8911 $718,481,918    13.02 RSI_PERIOD=8, RSI_OVERBOUGHT=73, RSI_OVERSOLD=28, BASE_POSITION_PCT=0.024
+    +11.43     0.13    12.23     4.46  59.9%    7657 $641,451,654    12.23 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=28, BASE_POSITION_PCT=0.024
+    +12.54     0.29    11.84     5.20  62.4%    7458 $629,372,930    11.84 RSI_PERIOD=8, RSI_OVERBOUGHT=73, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+    +13.07     0.35    11.51     7.22  67.6%    6202 $552,927,563    11.51 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+     +8.85     0.22     9.94     2.99  53.0%    8802 $696,187,255     9.94 RSI_PERIOD=8, RSI_OVERBOUGHT=65, RSI_OVERSOLD=20, BASE_POSITION_PCT=0.024
+     +7.59     0.30     9.07     2.64  51.3%   10076 $764,502,490     9.07 RSI_PERIOD=4, RSI_OVERBOUGHT=55, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+     +6.69     0.20     7.78     2.47  51.0%    9117 $713,438,704     7.78 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=36, BASE_POSITION_PCT=0.024
+    +10.62     0.52     7.67     6.08  68.1%    5140 $477,088,587     7.67 RSI_PERIOD=8, RSI_OVERBOUGHT=80, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+     +9.11     0.48     7.18     3.81  59.9%    6396 $550,411,805     7.18 RSI_PERIOD=8, RSI_OVERBOUGHT=73, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+     +5.85     0.29     5.63     2.33  49.8%    7736 $617,274,127     5.63 RSI_PERIOD=8, RSI_OVERBOUGHT=65, RSI_OVERSOLD=13, BASE_POSITION_PCT=0.024
+
+BEST: RSI_PERIOD=8, RSI_OVERBOUGHT=73, RSI_OVERSOLD=28, BASE_POSITION_PCT=0.024 -> Score=13.02, Sharpe=13.02, DD=0.10%, PF=3.95, WR=58.5%
+
+14:56:10 [INFO] Pool shut down — running walk-forward
+
+==========================================================================================
+WALK-FORWARD VALIDATION
+==========================================================================================
+Params: SHORT_WINDOW=6, MED_WINDOW=8, MED2_WINDOW=24, LONG_WINDOW=36, EMA_FAST=7, EMA_SLOW=26, RSI_PERIOD=8, BB_PERIOD=7, MACD_FAST=14, MACD_SLOW=23, MACD_SIGNAL=9, ATR_LOOKBACK=30, ATR_STOP_MULT=7.0, VOL_LOOKBACK=36, BASE_POSITION_PCT=0.024, COOLDOWN_BARS=4, FUNDING_LOOKBACK=24, CORR_LOOKBACK=72, FUNDING_BOOST=0.0, RSI_BULL=50, RSI_BEAR=55, RSI_OVERBOUGHT=73, RSI_OVERSOLD=28, MIN_VOTES=3, BASE_THRESHOLD=0.01, TARGET_VOL=0.015, PYRAMID_THRESHOLD=0.015, PYRAMID_SIZE=0.0, BTC_OPPOSE_THRESHOLD=-99.0, HIGH_CORR_THRESHOLD=99.0, DD_REDUCE_THRESHOLD=99.0, DD_REDUCE_SCALE=0.5, TAKE_PROFIT_PCT=99.0
+Folds: 4
+
+  Fold   Train%   TrBars   TeBars    TrRet%    TeRet%    TrDD%    TeDD%   TrScore   TeScore   Degrad%
+--------------------------------------------------------------------------------------------------------------
+     1      44%    11006    14010     +3.91     +4.93     0.19     0.11      9.11     10.57    -16.1%
+     2      58%    14511    10505     +4.54     +4.24     0.19     0.11      8.47     11.53    -36.1%
+     3      72%    18011     7005     +5.72     +2.88     0.19     0.18      8.85     10.48    -18.5%
+     4      86%    21516     3500     +7.65     +1.15     0.19     0.10      9.62     10.42     -8.4%
+--------------------------------------------------------------------------------------------------------------
+   AVG                                          +3.30              0.12               10.75    -19.8%
+
+  Consistent (>60% positive folds): True  |  Verdict: PASS
+  Results saved to: /Users/apguan/Desktop/auto-researchtrading/data_pipeline/tuning_results/tune_1h_20260401_150156.json
+
+==========================================================================================
+AUTO TUNE 1H — Iteration 4/8
+==========================================================================================
+Best score:     11.54 (-0.3% from iter 3)
+Walk-forward:   PASS
+Stability:      N/A
+Params changed: ATR_LOOKBACK=24->30, ATR_STOP_MULT=5.5->7.0, BASE_POSITION_PCT=0.088->0.024, BASE_THRESHOLD=0.012->0.01, COOLDOWN_BARS=2->4, MED_WINDOW=12->8, MIN_VOTES=4->3, RSI_BEAR=50->55, RSI_OVERBOUGHT=69->73, RSI_OVERSOLD=31->28
+Wall time:      4453s
+==========================================================================================
+15:01:57 [INFO] Committed: tune_1h: iteration 4 — score=11.54 (PASS)
+15:01:57 [INFO] CONVERGED: improvement below 2.0% for 3 consecutive iterations
+
+==========================================================================================
+AUTO TUNE 1H — FINAL SUMMARY
+==========================================================================================
+Total iterations: 4
+Converged:        YES
+Total wall time:  17690s (294.8min)
+
+ Iter      Score     Change
+------------------------------
+    1      11.54 (baseline)
+    2      11.57      +0.3%
+    3      11.57      +0.0%
+    4      11.54      -0.3%
+
+Best parameters (vs defaults):
+               ATR_LOOKBACK: 24 -> 30
+              ATR_STOP_MULT: 5.5 -> 7.0
+          BASE_POSITION_PCT: 0.088 -> 0.024
+             BASE_THRESHOLD: 0.012 -> 0.01
+              COOLDOWN_BARS: 2 -> 4
+                 MED_WINDOW: 12 -> 8
+                  MIN_VOTES: 4 -> 3
+                   RSI_BEAR: 50 -> 55
+             RSI_OVERBOUGHT: 69 -> 73
+               RSI_OVERSOLD: 31 -> 28
+==========================================================================================
+15:01:57 [INFO] Updating strategy.py with best params...
+15:01:57 [INFO] Strategy.py changes: {'MED_WINDOW': 8, 'ATR_LOOKBACK': 30, 'ATR_STOP_MULT': 7.0, 'BASE_POSITION_PCT': 0.024, 'COOLDOWN_BARS': 4, 'RSI_BEAR': 55, 'RSI_OVERBOUGHT': 73, 'RSI_OVERSOLD': 28, 'MIN_VOTES': 3, 'BASE_THRESHOLD': 0.01}
+15:01:57 [INFO] Updated strategy.py with 10 param changes
