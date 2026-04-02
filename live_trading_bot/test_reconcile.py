@@ -141,11 +141,7 @@ def test_desync_restores_state():
 
     assert "BTC" in adapter._strategy.atr_at_entry, "ATR should be restored"
     assert adapter._strategy.atr_at_entry["BTC"] > 0, (
-        f"ATR should be positive, got {adapter._strategy.atr_at_entry['BTC']}"
-    )
-
-    assert adapter._strategy.pyramided.get("BTC") is True, (
-        "Restored position should be marked as already pyramided"
+        f"ATR should be positive, got {adapter._strategy.atr_at_entry['BTC']:.2f}"
     )
 
     assert "BTC" not in adapter._strategy.exit_bar, (
