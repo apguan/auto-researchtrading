@@ -360,11 +360,11 @@ ACTIVE_PARAMS = (
     "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
     "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
     "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
-    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK", "FUNDING_BOOST",
+    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK",
     "BASE_POSITION_PCT", "VOL_LOOKBACK", "TARGET_VOL", "ATR_LOOKBACK",
     "ATR_STOP_MULT", "TAKE_PROFIT_PCT", "BASE_THRESHOLD",
-    "BTC_OPPOSE_THRESHOLD", "PYRAMID_THRESHOLD", "PYRAMID_SIZE",
-    "CORR_LOOKBACK", "HIGH_CORR_THRESHOLD", "DD_REDUCE_THRESHOLD",
+    "PYRAMID_THRESHOLD",
+    "CORR_LOOKBACK",
     "DD_REDUCE_SCALE", "COOLDOWN_BARS", "MIN_VOTES",
 )
 
@@ -408,12 +408,6 @@ def save_experiment_to_db(
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
 
-        if is_best:
-            cur.execute(
-                "UPDATE param_snapshots SET is_active = FALSE "
-                "WHERE is_active = TRUE AND period = '1h'"
-            )
-
         param_cols = ", ".join(ACTIVE_PARAMS)
         all_cols = (
             "run_date, sweep_name, period, symbol, is_active, is_best, "
@@ -434,8 +428,7 @@ def save_experiment_to_db(
             "autoresearch",
             "1h",
             "ALL",
-            is_best,
-            is_best,
+            False,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -496,4 +489,6 @@ def load_params_from_db() -> bool:
         return False
 
 
-load_params_from_db()
+import os as _os
+if _os.environ.get("LOAD_PARAMS_FROM_DB", "").lower() in ("1", "true", "yes"):
+    load_params_from_db()
