@@ -38,9 +38,10 @@ log() {
 log "=== DAILY AUTORESEARCH START ==="
 log "Config: total=$TOTAL, batch_size=$BATCH_SIZE, batches=$NUM_BATCHES"
 
-log "Downloading fresh data..."
+log "Downloading fresh data (6 months)..."
 rm -rf ~/.cache/autotrader/data/
-uv run prepare.py >> "$LOG_FILE" 2>&1
+uv run python scripts/download_daily_data.py >> "$LOG_FILE" 2>&1
+export DAILY_MODE=1
 log "Data ready."
 
 # ── 2. Git setup ───────────────────────────────────────────────
