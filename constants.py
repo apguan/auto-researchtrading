@@ -105,7 +105,6 @@ PARAM_COLUMNS: list[str] = [
     "MACD_SIGNAL",
     "BB_PERIOD",
     "FUNDING_LOOKBACK",
-    "FUNDING_BOOST",
     "BASE_POSITION_PCT",
     "VOL_LOOKBACK",
     "TARGET_VOL",
@@ -113,18 +112,11 @@ PARAM_COLUMNS: list[str] = [
     "ATR_STOP_MULT",
     "TAKE_PROFIT_PCT",
     "BASE_THRESHOLD",
-    "BTC_OPPOSE_THRESHOLD",
     "PYRAMID_THRESHOLD",
-    "PYRAMID_SIZE",
     "CORR_LOOKBACK",
-    "HIGH_CORR_THRESHOLD",
-    "DD_REDUCE_THRESHOLD",
     "DD_REDUCE_SCALE",
     "COOLDOWN_BARS",
     "MIN_VOTES",
-    "THRESHOLD_MIN",
-    "THRESHOLD_MAX",
-    "BB_COMPRESS_PCTILE",
 ]
 
 
@@ -140,10 +132,6 @@ UNIFORM_DEFAULTS: dict[str, int | float] = {
     "BASE_THRESHOLD": 0.012,
     "TARGET_VOL": 0.015,
     "PYRAMID_THRESHOLD": 0.015,
-    "PYRAMID_SIZE": 0.0,
-    "BTC_OPPOSE_THRESHOLD": -99.0,
-    "HIGH_CORR_THRESHOLD": 99.0,
-    "DD_REDUCE_THRESHOLD": 99.0,
     "DD_REDUCE_SCALE": 0.5,
     "TAKE_PROFIT_PCT": 99.0,
 }
@@ -174,10 +162,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "ATR_STOP_MULT": 5.5,
         "FUNDING_LOOKBACK": 96,
         "CORR_LOOKBACK": 288,
-        "BB_COMPRESS_PCTILE": 90,
-        "THRESHOLD_MIN": 0.005,
-        "THRESHOLD_MAX": 0.020,
-        "FUNDING_BOOST": 0.0,
         **UNIFORM_DEFAULTS,
     },
     "1m": {
@@ -199,7 +183,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "ATR_STOP_MULT": 6.5,
         "FUNDING_LOOKBACK": 1440,
         "CORR_LOOKBACK": 360,
-        "FUNDING_BOOST": 0.0,
         **UNIFORM_DEFAULTS,
     },
     "5m": {
@@ -220,7 +203,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "COOLDOWN_BARS": 12,
         "FUNDING_LOOKBACK": 288,
         "CORR_LOOKBACK": 360,
-        "FUNDING_BOOST": 0.0,
         **UNIFORM_DEFAULTS,
     },
     "1h": {
@@ -242,7 +224,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "COOLDOWN_BARS": 2,
         "FUNDING_LOOKBACK": 24,
         "CORR_LOOKBACK": 72,
-        "FUNDING_BOOST": 0.0,
         **UNIFORM_DEFAULTS,
     },
 }
