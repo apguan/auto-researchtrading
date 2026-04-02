@@ -1,5 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 from live_trading_bot.execution.signal_state import SignalState
 from live_trading_bot.execution.execution_engine import ExecutionEngine
 from live_trading_bot.exchange.types import (
@@ -230,3 +231,198 @@ class TestExecutionEngine:
         assert engine._position_sizes["BTC"] == 0.0
         assert engine._entry_prices["BTC"] == 0.0
         assert engine._last_executed_direction["BTC"] == 0
+
+    def test_calculate_position_size_momentum_weighting(
+        self, signal_state, mock_client
+    ):
+        settings = Settings(BASE_POSITION_PCT=0.088, EXECUTION_COOLDOWN_MS=100)
+        engine = ExecutionEngine(
+            signal_state,
+            mock_client,
+            settings,
+            ["BTC", "ETH", "SOL", "XRP", "HYPE"],
+        )
+        engine.set_equity(100000.0)
+
+        signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, 10)
+        signal_state.set_direction("ETH", 1, 0.03, 50.0, 3000.0, 10)
+        signal_state.set_direction("SOL", 1, 0.02, 50.0, 100.0, 10)
+
+        assert engine._calculate_position_size("BTC", 1) == pytest.approx(22000.0)
+        assert engine._calculate_position_size("ETH", 1) == pytest.approx(13200.0)
+        assert engine._calculate_position_size("SOL", 1) == pytest.approx(8800.0)
+
+        signal_state.set_direction("SOL", 0, 0.0, 50.0, 100.0, 10)
+        signal_state.momentum["ETH"] = -0.05
+        assert engine._calculate_position_size("BTC", 1) == pytest.approx(8800.0)
+
+        engine.set_equity(0.0)
+        signal_state.momentum["ETH"] = 0.03
+        assert engine._calculate_position_size("BTC", 1) == 0.0
+
+    def test_calculate_position_size_direction_veto(
+        self, signal_state, mock_client
+    ):
+        settings = Settings(BASE_POSITION_PCT=0.088, EXECUTION_COOLDOWN_MS=100)
+        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine.set_equity(100000.0)
+
+        signal_state.set_direction("BTC", 1, -0.05, 50.0, 50000.0, 10)
+        assert engine._calculate_position_size("BTC", 1) == 0.0
+
+        signal_state.set_direction("BTC", -1, 0.05, 50.0, 50000.0, 10)
+        assert engine._calculate_position_size("BTC", -1) == 0.0
+
+        signal_state.set_direction("BTC", 1, 0.0, 50.0, 50000.0, 10)
+        assert engine._calculate_position_size("BTC", 1) == 0.0
+
+        signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, 10)
+        assert engine._calculate_position_size("BTC", 1) > 0
+
+    @pytest.mark.asyncio
+    async def test_take_profit_exit(self, signal_state, mock_client):
+        mock_client.place_order = AsyncMock(
+            return_value=_make_filled_order(side=OrderSide.SELL, price=55000.0)
+        )
+        settings = Settings(TAKE_PROFIT_PCT=0.10, EXECUTION_COOLDOWN_MS=0)
+        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine._position_sizes["BTC"] = 0.1
+        engine._entry_prices["BTC"] = 50000.0
+        engine._last_executed_direction["BTC"] = 1
+
+        signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+
+        order = await engine.on_tick("BTC", 55000.0)
+        assert order is not None
+        assert mock_client.place_order.called
+        call_args = mock_client.place_order.call_args
+        assert call_args.kwargs.get("reduce_only") is True
+
+    @pytest.mark.asyncio
+    async def test_atr_trailing_stop_not_triggering(
+        self, settings, signal_state, mock_client
+    ):
+        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine._position_sizes["BTC"] = 0.1
+        engine._entry_prices["BTC"] = 50000.0
+        engine._last_executed_direction["BTC"] = 1
+
+        signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+        signal_state.peak_prices["BTC"] = 51000.0
+
+        order = await engine.on_tick("BTC", 50750.0)
+        assert order is None
+        assert not mock_client.place_order.called
+
+    @pytest.mark.asyncio
+    async def test_position_limiter_caps_size(self, signal_state, mock_client):
+        settings = Settings(
+            MAX_POSITION_PCT=0.005,
+            BASE_POSITION_PCT=0.088,
+            EXECUTION_COOLDOWN_MS=0,
+        )
+        engine = ExecutionEngine(
+            signal_state,
+            mock_client,
+            settings,
+            ["BTC"],
+            position_limiter=True,
+        )
+        engine.set_equity(100000.0)
+        signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+        signal_state.momentum["BTC"] = 0.05
+
+        order = await engine.on_tick("BTC", 50000.0)
+        assert order is not None
+        call_kwargs = mock_client.place_order.call_args.kwargs
+        assert call_kwargs["size"] == pytest.approx(0.01, abs=1e-6)
+
+    @pytest.mark.asyncio
+    async def test_risk_controller_blocks_entry(self, signal_state, mock_client):
+        mock_rc = MagicMock()
+        mock_rc.is_trading_enabled.return_value = False
+
+        settings = Settings(EXECUTION_COOLDOWN_MS=0)
+        engine = ExecutionEngine(
+            signal_state,
+            mock_client,
+            settings,
+            ["BTC"],
+            risk_controller=mock_rc,
+        )
+        engine.set_equity(100000.0)
+        signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+        signal_state.momentum["BTC"] = 0.05
+
+        order = await engine.on_tick("BTC", 50000.0)
+        assert order is None
+        assert not mock_client.place_order.called
+
+    @pytest.mark.asyncio
+    async def test_multiple_symbols_mixed_directions(
+        self, signal_state, mock_client
+    ):
+        settings = Settings(BASE_POSITION_PCT=0.088, EXECUTION_COOLDOWN_MS=0)
+        engine = ExecutionEngine(
+            signal_state,
+            mock_client,
+            settings,
+            ["BTC", "ETH", "SOL"],
+        )
+        engine.set_equity(100000.0)
+
+        signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, 10)
+        signal_state.set_direction("ETH", -1, -0.03, 50.0, 3000.0, 10)
+        signal_state.set_direction("SOL", 1, 0.02, 50.0, 100.0, 10)
+
+        await engine.on_tick("BTC", 50000.0)
+        btc_kwargs = mock_client.place_order.call_args.kwargs
+        assert btc_kwargs["size"] == pytest.approx(0.37714286, abs=1e-5)
+
+        mock_client.place_order.reset_mock()
+
+        await engine.on_tick("ETH", 3000.0)
+        eth_kwargs = mock_client.place_order.call_args.kwargs
+        assert eth_kwargs["size"] == pytest.approx(8.8, abs=1e-6)
+
+        mock_client.place_order.reset_mock()
+
+        await engine.on_tick("SOL", 100.0)
+        sol_kwargs = mock_client.place_order.call_args.kwargs
+        assert sol_kwargs["size"] == pytest.approx(75.428571, abs=1e-3)
+
+
+class TestRiskController:
+    def test_volatility_circuit_breaker(self):
+        mock_db = MagicMock()
+        with patch("live_trading_bot.risk.risk_controller.get_settings") as mock_gs:
+            mock_gs.return_value = Settings(
+                VOLATILITY_CIRCUIT_BREAKER_PCT=0.05,
+                VOLATILITY_LOOKBACK_MINUTES=10,
+            )
+            from live_trading_bot.risk.risk_controller import RiskController
+
+            rc = RiskController(mock_db)
+
+        base_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        r1 = rc.check_volatility_circuit_breaker(
+            "BTC", 50000.0, base_time
+        )
+        assert r1.allowed is True
+
+        r2 = rc.check_volatility_circuit_breaker(
+            "BTC", 50300.0, base_time + timedelta(minutes=1)
+        )
+        assert r2.allowed is True
+
+        r3 = rc.check_volatility_circuit_breaker(
+            "BTC", 53000.0, base_time + timedelta(minutes=5)
+        )
+        assert r3.allowed is False
+        assert "Volatility circuit breaker" in r3.reason
+
+        r4 = rc.check_volatility_circuit_breaker(
+            "BTC", 53000.0, base_time + timedelta(minutes=11)
+        )
+        assert r4.allowed is True
