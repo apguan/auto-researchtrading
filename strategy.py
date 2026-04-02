@@ -52,7 +52,7 @@ DD_REDUCE_THRESHOLD = 99.0
 DD_REDUCE_SCALE = 0.5
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 4  # out of 6 now
+MIN_VOTES = 5
 
 
 def ema(values, span):
@@ -415,10 +415,9 @@ def save_experiment_to_db(
             "profit_factor, win_rate_pct, num_trades, ret_dd_ratio, "
             "is_best, previous_snapshot_id, "
             + param_cols
-            + ", threshold_min, threshold_max, bb_compress_pctile, "
-            "symbol, is_active"
+            + ", symbol, is_active, description, score, status"
         )
-        num_placeholders = 12 + len(ACTIVE_PARAMS) + 3 + 2
+        num_placeholders = 12 + len(ACTIVE_PARAMS) + 2 + 3
         all_placeholders = ", ".join(["%s"] * num_placeholders)
 
         ret_dd_ratio = (
@@ -442,7 +441,7 @@ def save_experiment_to_db(
         ]
         for c in ACTIVE_PARAMS:
             values.append(float(params[c]))
-        values.extend([0.005, 0.020, 90, "ALL", False])
+        values.extend(["ALL", False, description, score, status])
 
         cur.execute(
             f"INSERT INTO param_snapshots ({all_cols}) VALUES ({all_placeholders})",
