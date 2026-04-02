@@ -76,7 +76,6 @@ class Settings:
     DRY_RUN_INITIAL_CAPITAL: float = 100_000.0
 
     # Tick execution settings
-    TICK_EXECUTION_ENABLED: bool = False
     ENTRY_SLIPPAGE_PCT: float = 0.02
     EXECUTION_COOLDOWN_MS: int = 5000
 
@@ -136,9 +135,6 @@ class Settings:
 
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
             settings.DRY_RUN_INITIAL_CAPITAL = float(val)
-
-        if val := os.getenv("TICK_EXECUTION_ENABLED"):
-            settings.TICK_EXECUTION_ENABLED = val.lower() in ("true", "1", "yes")
 
         if val := os.getenv("ENTRY_SLIPPAGE_PCT"):
             settings.ENTRY_SLIPPAGE_PCT = float(val)
