@@ -104,7 +104,6 @@ PARAM_COLUMNS: list[str] = [
     "MACD_SLOW",
     "MACD_SIGNAL",
     "BB_PERIOD",
-    "FUNDING_LOOKBACK",
     "BASE_POSITION_PCT",
     "VOL_LOOKBACK",
     "TARGET_VOL",
@@ -112,9 +111,6 @@ PARAM_COLUMNS: list[str] = [
     "ATR_STOP_MULT",
     "TAKE_PROFIT_PCT",
     "BASE_THRESHOLD",
-    "PYRAMID_THRESHOLD",
-    "CORR_LOOKBACK",
-    "DD_REDUCE_SCALE",
     "COOLDOWN_BARS",
     "MIN_VOTES",
 ]
@@ -131,8 +127,6 @@ UNIFORM_DEFAULTS: dict[str, int | float] = {
     "MIN_VOTES": 4,
     "BASE_THRESHOLD": 0.012,
     "TARGET_VOL": 0.015,
-    "PYRAMID_THRESHOLD": 0.015,
-    "DD_REDUCE_SCALE": 0.5,
     "TAKE_PROFIT_PCT": 99.0,
 }
 
@@ -160,8 +154,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "BASE_POSITION_PCT": 0.08,
         "COOLDOWN_BARS": 8,
         "ATR_STOP_MULT": 5.5,
-        "FUNDING_LOOKBACK": 96,
-        "CORR_LOOKBACK": 288,
         **UNIFORM_DEFAULTS,
     },
     "1m": {
@@ -181,8 +173,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "BASE_POSITION_PCT": 2.00,
         "COOLDOWN_BARS": 60,
         "ATR_STOP_MULT": 6.5,
-        "FUNDING_LOOKBACK": 1440,
-        "CORR_LOOKBACK": 360,
         **UNIFORM_DEFAULTS,
     },
     "5m": {
@@ -201,8 +191,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "VOL_LOOKBACK": 240,
         "BASE_POSITION_PCT": 0.50,
         "COOLDOWN_BARS": 12,
-        "FUNDING_LOOKBACK": 288,
-        "CORR_LOOKBACK": 360,
         **UNIFORM_DEFAULTS,
     },
     "1h": {
@@ -222,8 +210,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "VOL_LOOKBACK": 36,
         "BASE_POSITION_PCT": 0.088,
         "COOLDOWN_BARS": 2,
-        "FUNDING_LOOKBACK": 24,
-        "CORR_LOOKBACK": 72,
         **UNIFORM_DEFAULTS,
     },
 }
