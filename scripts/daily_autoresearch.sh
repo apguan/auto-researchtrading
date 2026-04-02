@@ -14,6 +14,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load .env if present
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 TOTAL=${1:-100}
 BATCH_SIZE=${2:-10}
 NUM_BATCHES=$(( (TOTAL + BATCH_SIZE - 1) / BATCH_SIZE ))
