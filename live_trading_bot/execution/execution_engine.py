@@ -11,7 +11,7 @@ import strategy as _strategy
 
 from ..execution.signal_state import SignalState
 from ..exchange.interface import Exchange
-from ..exchange.types import Order, OrderSide, OrderStatus, OrderType, AccountState
+from ..exchange.types import Order, OrderSide, OrderStatus, OrderType, AccountState, PositionSide
 from ..config.settings import Settings
 from ..monitoring.logger import get_logger
 
@@ -57,9 +57,11 @@ class ExecutionEngine:
         self._last_executed_direction: Dict[str, int] = {}  # symbol -> +1/-1/0
         self._last_execution_attempt: Dict[str, float] = {}  # symbol -> timestamp
 
-        # Store close info before clearing for PnL calculation in bot
-        self._last_close_entry_price: float = 0.0
-        self._last_close_direction: int = 0
+        # Per-symbol close info for PnL calculation in bot (symbol -> (entry_price, direction))
+        self._pending_close_info: Dict[str, tuple[float, int]] = {}
+
+        # Symbols currently in the process of closing (prevent sync_positions re-hydrating)
+        self._closing: set = set()
 
         # Equity for position sizing (set by bot on bar close via set_equity)
         self._equity: float = 0.0
@@ -82,6 +84,11 @@ class ExecutionEngine:
     def clear_pending_reversal(self, symbol: str) -> None:
         """Clear pending reversal for a symbol when new direction is set on bar close."""
         self._pending_reversal.pop(symbol, None)
+
+    def consume_close_info(self, symbol: str) -> tuple[float, int]:
+        """Return and clear the last close info for a symbol. Returns (0, 0) if none."""
+        info = self._pending_close_info.pop(symbol, (0.0, 0))
+        return info
 
     async def on_tick(self, symbol: str, price: float) -> Optional[Order]:
         """Process a tick. Returns the order placed, or None.
@@ -106,6 +113,20 @@ class ExecutionEngine:
         current_direction = self._last_executed_direction.get(symbol, 0)
         target_direction = self.signal_state.get_direction(symbol)
         entry_price = self._entry_prices.get(symbol, 0.0)
+
+        logger.debug(
+            "tick",
+            extra={
+                "symbol": symbol,
+                "price": price,
+                "current_size": round(current_size, 8),
+                "current_dir": current_direction,
+                "target_dir": target_direction,
+                "entry_price": entry_price,
+                "pending_reversal": self._pending_reversal.get(symbol),
+                "cooldown": self.signal_state.is_in_cooldown(symbol, self.settings.COOLDOWN_BARS) if current_size == 0 else False,
+            },
+        )
 
         # ==============================================================
         # EXIT CHECKS (only if we have a position)
@@ -229,8 +250,8 @@ class ExecutionEngine:
                 effective_direction = target_direction
 
             if effective_direction != 0:
-                # Bar-based cooldown check (after execution-engine-initiated exits)
-                if self.signal_state.is_in_cooldown(
+                # Bar-based cooldown — skip for pending reversals (Option A: re-enter on next tick)
+                if pending_dir is None and self.signal_state.is_in_cooldown(
                     symbol, self.settings.COOLDOWN_BARS
                 ):
                     logger.debug(
@@ -263,13 +284,19 @@ class ExecutionEngine:
                 # Direction-aware momentum sizing
                 target_usd = self._calculate_position_size(symbol, effective_direction)
                 if target_usd <= 0:
-                    logger.debug(
-                        "Entry skipped — momentum sizing returned 0",
-                        extra={
-                            "symbol": symbol,
-                            "direction": effective_direction,
-                        },
-                    )
+                    if pending_dir is not None:
+                        logger.warning(
+                            "Pending reversal vetoed by momentum — clearing",
+                            extra={"symbol": symbol, "direction": effective_direction},
+                        )
+                    else:
+                        logger.debug(
+                            "Entry skipped — momentum sizing returned 0",
+                            extra={
+                                "symbol": symbol,
+                                "direction": effective_direction,
+                            },
+                        )
                     self._last_execution_attempt[symbol] = now_ms
                     return None
 
@@ -349,8 +376,16 @@ class ExecutionEngine:
 
         # Only size if direction matches momentum sign
         if direction > 0 and momentum <= 0:
+            logger.debug(
+                "momentum veto: long signal but non-positive momentum",
+                extra={"symbol": symbol, "momentum": momentum, "direction": direction},
+            )
             return 0.0  # Bullish signal but negative/zero momentum — skip
         if direction < 0 and momentum >= 0:
+            logger.debug(
+                "momentum veto: short signal but non-negative momentum",
+                extra={"symbol": symbol, "momentum": momentum, "direction": direction},
+            )
             return 0.0  # Bearish signal but positive/zero momentum — skip
 
         equity = self._equity
@@ -373,6 +408,19 @@ class ExecutionEngine:
         size = equity * self.settings.BASE_POSITION_PCT * weight * len(self.symbols)
         # len(self.symbols) multiplier because each symbol gets BASE_POSITION_PCT
         # of equity, distributed by momentum so strongest conviction gets most.
+
+        logger.debug(
+            "position sized",
+            extra={
+                "symbol": symbol,
+                "momentum": momentum,
+                "weight": round(weight, 4),
+                "total_momentum": round(total_momentum, 6),
+                "same_dir_symbols": list(same_direction_momenta.keys()),
+                "equity": round(equity, 2),
+                "target_usd": round(size, 2),
+            },
+        )
 
         return size
 
@@ -402,6 +450,15 @@ class ExecutionEngine:
             },
         )
 
+        # Capture close info BEFORE the await to prevent race condition:
+        # _on_bar can fire during await and overwrite _last_executed_direction.
+        self._pending_close_info[symbol] = (
+            self._entry_prices.get(symbol, 0.0),
+            current_direction,
+        )
+
+        self._closing.add(symbol)
+
         order = await self.client.place_order(
             symbol=symbol,
             side=close_side,
@@ -410,9 +467,7 @@ class ExecutionEngine:
             reduce_only=True,
         )
 
-        # Store close info BEFORE clearing for PnL calculation in bot
-        self._last_close_entry_price = self._entry_prices.get(symbol, 0.0)
-        self._last_close_direction = self._last_executed_direction.get(symbol, 0)
+        self._closing.discard(symbol)
 
         if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             self._position_sizes[symbol] = 0.0
@@ -460,6 +515,8 @@ class ExecutionEngine:
     ) -> None:
         """Resync position tracking from exchange state. Called on bar close."""
         for symbol in self.symbols:
+            if symbol in self._closing:
+                continue
             pos = account_state.positions.get(symbol)
             if pos and pos.size > 0:
                 self._position_sizes[symbol] = pos.size
@@ -469,10 +526,10 @@ class ExecutionEngine:
                 direction = self.signal_state.get_direction(symbol)
                 if direction != 0:
                     self._last_executed_direction[symbol] = direction
-                elif self._last_executed_direction.get(symbol) == 0:
-                    # We have a position but no direction — infer from signal state target
-                    target = self.signal_state.get_target(symbol)
-                    self._last_executed_direction[symbol] = 1 if target > 0 else -1
+                elif self._last_executed_direction.get(symbol, 0) == 0:
+                    self._last_executed_direction[symbol] = (
+                        1 if pos.side == PositionSide.LONG else -1
+                    )
             else:
                 if self._position_sizes.get(symbol, 0.0) > 0:
                     logger.info(
@@ -490,3 +547,5 @@ class ExecutionEngine:
         self._last_executed_direction.clear()
         self._last_execution_attempt.clear()
         self._pending_reversal.clear()
+        self._pending_close_info.clear()
+        self._closing.clear()
