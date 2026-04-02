@@ -285,8 +285,7 @@ def load_latest_results() -> tuple[dict | None, str | None, dict[str, dict] | No
 def subsample_data(data: dict, every_n: int = 4) -> dict:
     """Take every Nth timestamp from each symbol's DataFrame.
 
-    every_n=4 on 15m data gives ~1h effective resolution.
-    Reduces bar count (and backtest time) by ~4x.
+    Reduces bar count (and backtest time) by ~Nx.
     """
     if every_n <= 1:
         return data
