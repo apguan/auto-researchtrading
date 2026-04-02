@@ -197,15 +197,15 @@ class Strategy:
             _SHORT_WINDOW = _get_param(symbol, "SHORT_WINDOW")
             _MED_WINDOW = _get_param(symbol, "MED_WINDOW")
             _BASE_THRESHOLD = _get_param(symbol, "BASE_THRESHOLD")
-            _THRESHOLD_MIN = _get_param(symbol, "THRESHOLD_MIN")
-            _THRESHOLD_MAX = _get_param(symbol, "THRESHOLD_MAX")
+            _THRESHOLD_MIN = THRESHOLD_MIN
+            _THRESHOLD_MAX = THRESHOLD_MAX
             _EMA_FAST = _get_param(symbol, "EMA_FAST")
             _EMA_SLOW = _get_param(symbol, "EMA_SLOW")
             _RSI_PERIOD = _get_param(symbol, "RSI_PERIOD")
             _RSI_BULL = _get_param(symbol, "RSI_BULL")
             _RSI_BEAR = _get_param(symbol, "RSI_BEAR")
             _BB_PERIOD = _get_param(symbol, "BB_PERIOD")
-            _BB_COMPRESS_PCTILE = _get_param(symbol, "BB_COMPRESS_PCTILE")
+            _BB_COMPRESS_PCTILE = BB_COMPRESS_PCTILE
             _MIN_VOTES = _get_param(symbol, "MIN_VOTES")
             _COOLDOWN_BARS = _get_param(symbol, "COOLDOWN_BARS")
             _BASE_POSITION_PCT = _get_param(symbol, "BASE_POSITION_PCT")
@@ -217,10 +217,10 @@ class Strategy:
             _RSI_OVERBOUGHT = _get_param(symbol, "RSI_OVERBOUGHT")
             _RSI_OVERSOLD = _get_param(symbol, "RSI_OVERSOLD")
             _PYRAMID_THRESHOLD = _get_param(symbol, "PYRAMID_THRESHOLD")
-            _PYRAMID_SIZE = _get_param(symbol, "PYRAMID_SIZE")
+            _PYRAMID_SIZE = PYRAMID_SIZE
             _FUNDING_LOOKBACK = _get_param(symbol, "FUNDING_LOOKBACK")
-            _FUNDING_BOOST = _get_param(symbol, "FUNDING_BOOST")
-            _BTC_OPPOSE_THRESHOLD = _get_param(symbol, "BTC_OPPOSE_THRESHOLD")
+            _FUNDING_BOOST = FUNDING_BOOST
+            _BTC_OPPOSE_THRESHOLD = BTC_OPPOSE_THRESHOLD
             _MACD_FAST = _get_param(symbol, "MACD_FAST")
             _MACD_SLOW = _get_param(symbol, "MACD_SLOW")
             _MACD_SIGNAL = _get_param(symbol, "MACD_SIGNAL")
@@ -435,7 +435,6 @@ def _load_params_from_db():
         "COOLDOWN_BARS",
         "MIN_VOTES",
         "CORR_LOOKBACK",
-        "BB_COMPRESS_PCTILE",
     }
 
     try:
@@ -450,7 +449,7 @@ def _load_params_from_db():
                 cur.execute(
                     "SELECT symbol, "
                     + ", ".join(PARAM_COLUMNS)
-                    + " FROM param_snapshots WHERE is_active = TRUE"
+                    + " FROM param_snapshots WHERE is_active = TRUE AND period = '15m'"
                 )
                 rows = cur.fetchall()
                 col_names = [desc[0] for desc in cur.description]
