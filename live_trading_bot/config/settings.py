@@ -65,6 +65,7 @@ class Settings:
     DB_PATH: str = "trading_bot.db"
     SUPABASE_DB_URL: str = ""
     LOG_PATH: str = "logs/bot.log"
+    LOG_LEVEL: str = "INFO"
 
     ALERT_INTERVAL_HOURS: float = 1.0
     ALERT_ON_TRADE: bool = True
@@ -127,6 +128,9 @@ class Settings:
 
         if val := os.getenv("SUPABASE_DB_URL"):
             settings.SUPABASE_DB_URL = val
+
+        if val := os.getenv("LOG_LEVEL"):
+            settings.LOG_LEVEL = val.upper()
 
         if val := os.getenv("LOOKBACK_BARS"):
             settings.LOOKBACK_BARS = int(val)

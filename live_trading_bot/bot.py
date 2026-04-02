@@ -77,7 +77,9 @@ class TradingBot:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         setup_logger(
-            log_level="INFO", log_path=self.settings.LOG_PATH, json_format=True
+            log_level=self.settings.LOG_LEVEL,
+            log_path=self.settings.LOG_PATH,
+            json_format=True,
         )
 
         logger.info(
@@ -302,6 +304,19 @@ class TradingBot:
                     bar_count=self._bar_count,
                 )
 
+                logger.debug(
+                    "signal processed",
+                    extra={
+                        "symbol": sig.symbol,
+                        "direction": direction,
+                        "target_position": sig.target_position,
+                        "momentum": round(momentum, 6),
+                        "atr": round(atr, 4),
+                        "entry_price": entry_price,
+                        "bar_count": self._bar_count,
+                    },
+                )
+
                 self.execution_engine.clear_pending_reversal(sig.symbol)
 
             positions_usd = self._positions_to_usd()
@@ -393,8 +408,7 @@ class TradingBot:
 
         pnl = None
         if self.execution_engine:
-            entry = self.execution_engine._last_close_entry_price
-            direction = self.execution_engine._last_close_direction
+            entry, direction = self.execution_engine.consume_close_info(order.symbol)
             if entry > 0 and direction != 0:
                 if direction > 0 and order.side.value == "sell":  # closing long
                     pnl = (order.avg_fill_price - entry) * order.filled_size
