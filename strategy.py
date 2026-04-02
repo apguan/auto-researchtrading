@@ -360,11 +360,11 @@ ACTIVE_PARAMS = (
     "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
     "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
     "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
-    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK",
+    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK", "FUNDING_BOOST",
     "BASE_POSITION_PCT", "VOL_LOOKBACK", "TARGET_VOL", "ATR_LOOKBACK",
     "ATR_STOP_MULT", "TAKE_PROFIT_PCT", "BASE_THRESHOLD",
-    "PYRAMID_THRESHOLD",
-    "CORR_LOOKBACK",
+    "BTC_OPPOSE_THRESHOLD", "PYRAMID_THRESHOLD", "PYRAMID_SIZE",
+    "CORR_LOOKBACK", "HIGH_CORR_THRESHOLD", "DD_REDUCE_THRESHOLD",
     "DD_REDUCE_SCALE", "COOLDOWN_BARS", "MIN_VOTES",
 )
 
@@ -408,15 +408,18 @@ def save_experiment_to_db(
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
 
-        param_cols = ", ".join(ACTIVE_PARAMS)
+        param_cols = ", ".join(p.lower() for p in ACTIVE_PARAMS)
         all_cols = (
-            "run_date, sweep_name, period, symbol, is_active, is_best, "
+            "run_date, sweep_name, period, "
             "sharpe, total_return_pct, max_drawdown_pct, "
             "profit_factor, win_rate_pct, num_trades, ret_dd_ratio, "
-            "score, status, description, "
+            "is_best, previous_snapshot_id, "
             + param_cols
+            + ", threshold_min, threshold_max, bb_compress_pctile, "
+            "symbol, is_active"
         )
-        all_placeholders = ", ".join(["%s"] * (15 + len(ACTIVE_PARAMS)))
+        num_placeholders = 12 + len(ACTIVE_PARAMS) + 3 + 2
+        all_placeholders = ", ".join(["%s"] * num_placeholders)
 
         ret_dd_ratio = (
             total_return_pct / max_drawdown_pct
@@ -427,8 +430,6 @@ def save_experiment_to_db(
             datetime.now(timezone.utc).isoformat(),
             "autoresearch",
             "1h",
-            "ALL",
-            False,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -436,12 +437,12 @@ def save_experiment_to_db(
             win_rate_pct,
             num_trades,
             ret_dd_ratio,
-            score,
-            status,
-            description,
+            is_best,
+            None,
         ]
         for c in ACTIVE_PARAMS:
             values.append(float(params[c]))
+        values.extend([0.005, 0.020, 90, "ALL", False])
 
         cur.execute(
             f"INSERT INTO param_snapshots ({all_cols}) VALUES ({all_placeholders})",
