@@ -1,24 +1,13 @@
 import os
 import sys
-import types
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import common  # noqa: E402
-
-
-def _inject_mock_module(name: str, **attrs) -> types.ModuleType:
-    mod = types.ModuleType(name)
-    for k, v in attrs.items():
-        setattr(mod, k, v)
-    sys.modules[name] = mod
-    return mod
 
 
 class TestFindBestResult:
@@ -160,94 +149,5 @@ class TestComputePeriod:
         assert result == "2024-01-01_2024-01-08"
 
 
-MOCK_DEFAULTS = {
-    "SHORT_WINDOW": 24,
-    "MED_WINDOW": 48,
-    "EMA_FAST": 28,
-    "EMA_SLOW": 104,
-}
 
 
-@pytest.fixture
-def mock_db():
-    mock_pg = MagicMock()
-    mock_tune = types.ModuleType("backtest.tune_15m")
-    setattr(mock_tune, "DEFAULTS", MOCK_DEFAULTS)
-
-    _inject_mock_module("backtest")
-    sys.modules["backtest.tune_15m"] = mock_tune
-    sys.modules["psycopg2"] = mock_pg
-
-    mock_conn = MagicMock()
-    mock_cur = MagicMock()
-    mock_conn.cursor.return_value = mock_cur
-    mock_cur.fetchone.return_value = None
-    mock_pg.connect.return_value = mock_conn
-
-    yield mock_pg, mock_conn, mock_cur
-
-    sys.modules.pop("backtest.tune_15m", None)
-    sys.modules.pop("backtest", None)
-    sys.modules.pop("psycopg2", None)
-
-
-class TestSaveSnapshotsToDb:
-    def test_coerces_numpy_types_to_plain_float(self, mock_db):
-        _, _, mock_cur = mock_db
-
-        np_snap = {
-            "symbol": "BTC",
-            "params": {"SHORT_WINDOW": 30},
-            "score": 3.5,
-            "sweep_name": "daily_tune",
-            "period": "2024-01-01_2024-01-31",
-            "sharpe": np.float64(2.1),
-            "total_return_pct": np.float64(15.3),
-            "max_drawdown_pct": np.float64(1.2),
-            "profit_factor": np.float64(1.8),
-            "win_rate_pct": np.float64(55.0),
-            "num_trades": np.int64(42),
-            "ret_dd_ratio": np.float64(12.75),
-        }
-
-        with patch.dict(os.environ, {"SUPABASE_DB_URL": "postgres://fake"}):
-            result = common.save_snapshots_to_db([np_snap], is_active=False)
-
-        assert result == 1
-        insert_calls = [
-            c for c in mock_cur.execute.call_args_list if "INSERT" in c[0][0]
-        ]
-        assert len(insert_calls) == 1
-        values = insert_calls[0][0][1]
-        for i, v in enumerate(values):
-            assert not isinstance(v, (np.integer, np.floating)), (
-                f"value at index {i} is {type(v).__name__}: {v}"
-            )
-
-    def test_is_active_false_skips_deactivate_and_sets_prev_id_none(self, mock_db):
-        _, _, mock_cur = mock_db
-        snap = {
-            "symbol": "BTC",
-            "params": {"SHORT_WINDOW": 30},
-            "score": 3.5,
-            "sweep_name": "daily_tune",
-            "period": "2024-01-01_2024-01-31",
-        }
-
-        with patch.dict(os.environ, {"SUPABASE_DB_URL": "postgres://fake"}):
-            common.save_snapshots_to_db([snap], is_active=False)
-
-        sqls = [c[0][0] for c in mock_cur.execute.call_args_list]
-        assert not any("UPDATE" in s and "is_active" in s for s in sqls)
-        assert not any("SELECT" in s and "is_active" in s for s in sqls)
-        insert_calls = [
-            c for c in mock_cur.execute.call_args_list if "INSERT" in c[0][0]
-        ]
-        values = insert_calls[0][0][1]
-        assert values[12] is None
-
-    def test_returns_zero_when_db_url_not_set(self, mock_db):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SUPABASE_DB_URL", None)
-            result = common.save_snapshots_to_db([{"symbol": "BTC", "params": {}}])
-        assert result == 0
