@@ -25,6 +25,55 @@ class SignalState:
     # symbol -> timestamp of last bar that generated the signal
     signal_timestamps: Dict[str, Optional[datetime]] = field(default_factory=dict)
 
+    # symbol -> raw 12h return (set on bar close by bot)
+    momentum: Dict[str, float] = field(default_factory=dict)
+
+    # incremented on each bar close, used for cooldown tracking
+    bar_count: int = 0
+
+    # symbol -> bar_count when position was closed by execution engine
+    last_exit_bar: Dict[str, int] = field(default_factory=dict)
+
+    def set_direction(
+        self,
+        symbol: str,
+        direction: int,
+        momentum: float,
+        atr: float,
+        entry_price: float,
+        bar_count: int,
+    ) -> None:
+        """Called by bot on each bar close after strategy runs.
+
+        direction: +1 (long), -1 (short), or 0 (flat/no signal).
+        Stores direction placeholder in target_positions; actual sizing done
+        by execution engine. Resets peak/trough to entry_price on new signal.
+        """
+        self.bar_count = bar_count
+        self.momentum[symbol] = momentum
+        self.signal_atr[symbol] = atr
+        self.signal_entry[symbol] = entry_price
+
+        if direction == 0:
+            self.target_positions[symbol] = 0.0
+            self.clear_signal(symbol)
+        else:
+            self.target_positions[symbol] = float(direction)
+            self.peak_prices[symbol] = entry_price
+            self.trough_prices[symbol] = entry_price
+
+    def record_exit(self, symbol: str, bar_count: int) -> None:
+        """Called by execution engine when it closes a position on a tick.
+
+        Records bar_count for cooldown enforcement. Does NOT clear direction —
+        the strategy may still want to be in this direction.
+        """
+        self.last_exit_bar[symbol] = bar_count
+
+    def is_in_cooldown(self, symbol: str, cooldown_bars: int) -> bool:
+        """Returns True if fewer than cooldown_bars have elapsed since last exit."""
+        return (self.bar_count - self.last_exit_bar.get(symbol, -999)) < cooldown_bars
+
     def update_signal(
         self,
         symbol: str,
