@@ -20,11 +20,8 @@ class Settings:
     SYMBOL_WEIGHTS: Dict[str, float] = field(
         default_factory=lambda: make_equal_weights(ALL_SYMBOLS)
     )
-    BAR_INTERVAL: str = "15m"
-    # LOOKBACK_BARS scales per interval: 1m→2000, 5m→1000, 15m→500, 1h→500
+    BAR_INTERVAL: str = "1h"
     LOOKBACK_BARS: int = 500
-    # Module path for the backtest strategy; auto-derived from BAR_INTERVAL in from_env()
-    STRATEGY_MODULE: str = "strategies.strategy_15m"
 
     BASE_POSITION_PCT: float = 0.08
     MAX_POSITION_PCT: float = 0.30
@@ -132,24 +129,9 @@ class Settings:
         if val := os.getenv("SUPABASE_DB_URL"):
             settings.SUPABASE_DB_URL = val
 
-        if val := os.getenv("STRATEGY_MODULE"):
-            settings.STRATEGY_MODULE = val
-        else:
-            _interval_strategy_map = {
-                "1m": "strategies.strategy_1m",
-                "5m": "strategies.strategy_5m",
-                "15m": "strategies.strategy_15m",
-                "1h": "_bt_strategy",
-            }
-            settings.STRATEGY_MODULE = _interval_strategy_map.get(
-                settings.BAR_INTERVAL, "strategies.strategy_15m"
-            )
-
         if val := os.getenv("LOOKBACK_BARS"):
             settings.LOOKBACK_BARS = int(val)
         else:
-            # Must be >= strategy's max(LONG_WINDOW, ...) + 1 to generate signals.
-            # 1m LONG_WINDOW=720 needs 721+; 5m LONG_WINDOW=432 needs 433+.
             settings.LOOKBACK_BARS = LOOKBACK_BARS.get(settings.BAR_INTERVAL, 500)
 
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
