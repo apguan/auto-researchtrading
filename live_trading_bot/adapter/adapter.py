@@ -1,5 +1,4 @@
 import sys
-import importlib
 import importlib.util
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -20,17 +19,21 @@ if "prepare" not in sys.modules:
 else:
     _p_mod = sys.modules["prepare"]
 
-_s_spec = importlib.util.spec_from_file_location(
-    "_bt_strategy", repo_root / "strategy.py"
-)
-assert _s_spec is not None, f"Failed to load spec for {repo_root / 'strategy.py'}"
-assert _s_spec.loader is not None, f"No loader for {repo_root / 'strategy.py'}"
-_s_mod = importlib.util.module_from_spec(_s_spec)
-sys.modules["_bt_strategy"] = _s_mod
-_s_spec.loader.exec_module(_s_mod)
+if "strategy" not in sys.modules:
+    _s_spec = importlib.util.spec_from_file_location(
+        "strategy", repo_root / "strategy.py"
+    )
+    assert _s_spec is not None, f"Failed to load spec for {repo_root / 'strategy.py'}"
+    assert _s_spec.loader is not None, f"No loader for {repo_root / 'strategy.py'}"
+    _s_mod = importlib.util.module_from_spec(_s_spec)
+    sys.modules["strategy"] = _s_mod
+    _s_spec.loader.exec_module(_s_mod)
+else:
+    _s_mod = sys.modules["strategy"]
 
 BarData = _p_mod.BarData
 PortfolioState = _p_mod.PortfolioState
+BacktestStrategy = _s_mod.Strategy
 
 from ..exchange.order_manager import Signal as LiveSignal
 from ..exchange.types import Candle, AccountState, PositionSide
@@ -38,14 +41,6 @@ from ..config import get_settings
 from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
-
-_settings = get_settings()
-
-if _settings.STRATEGY_MODULE == "_bt_strategy":
-    BacktestStrategy = _s_mod.Strategy
-else:
-    _strategy_mod = importlib.import_module(_settings.STRATEGY_MODULE)
-    BacktestStrategy = _strategy_mod.Strategy
 
 
 class LiveStrategyAdapter:
@@ -58,7 +53,6 @@ class LiveStrategyAdapter:
 
     def __init__(self):
         self._strategy = BacktestStrategy()
-        self._settings = get_settings()
 
     def on_bar(
         self,
@@ -170,9 +164,6 @@ class LiveStrategyAdapter:
                 else:
                     strategy.atr_at_entry[symbol] = price * 0.02
 
-                # Mark as already-pyramided to avoid re-pyramiding a restored
-                # position, and cancel any cooldown from the failed exit
-                strategy.pyramided[symbol] = True
                 strategy.exit_bar.pop(symbol, None)
 
                 logger.info(
@@ -217,3 +208,6 @@ class LiveStrategyAdapter:
 
     def reset(self):
         self._strategy = BacktestStrategy()
+
+    def get_atr_at_entry(self, symbol: str) -> float:
+        return self._strategy.atr_at_entry.get(symbol, 0.0)
