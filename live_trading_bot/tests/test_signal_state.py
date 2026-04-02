@@ -59,3 +59,17 @@ class TestSignalState:
     def test_get_direction_unknown_symbol(self):
         s = SignalState()
         assert s.get_direction("DOGE") == 0
+
+    def test_is_in_cooldown_blocks_then_allows(self):
+        s = SignalState()
+        assert s.is_in_cooldown("BTC", 3) is False
+
+        s.bar_count = 10
+        s.record_exit("BTC", 10)
+
+        for bar in (10, 11, 12):
+            s.bar_count = bar
+            assert s.is_in_cooldown("BTC", 3) is True
+
+        s.bar_count = 13
+        assert s.is_in_cooldown("BTC", 3) is False
