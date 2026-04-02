@@ -154,8 +154,7 @@ class StopManager:
             # For longs: stop below entry. For shorts: stop above entry.
             # Use simple fixed-distance stop from entry (not trailing)
             # since we can't track peaks/troughs on the exchange.
-            # ATR_STOP_MULT = 8.0 matches strategy_15m.py constant
-            atr_stop_mult = 8.0
+            atr_stop_mult = 5.5
             stop_distance = atr * atr_stop_mult * widening_mult
             if pos.side.value == "long":
                 stop_price = round(entry - stop_distance, 2)

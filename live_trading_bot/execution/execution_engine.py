@@ -87,29 +87,27 @@ class ExecutionEngine:
 
         # Priority 2: ATR trailing stop
         if current_size > 0 and entry_price > 0:
-            atr = self.signal_state.signal_atr.get(symbol, 0.0)
-            if atr > 0:
-                # Get ATR_STOP_MULT from strategy — we use a fixed 8.0 as the strategy default
-                # The strategy_15m.py has ATR_STOP_MULT = 8.0
-                atr_stop_mult = 8.0  # matches strategy_15m.py constant
+                atr = self.signal_state.signal_atr.get(symbol, 0.0)
+                if atr > 0:
+                    atr_stop_mult = 5.5
 
-                if current_direction > 0:  # long
-                    peak = self.signal_state.peak_prices.get(symbol, entry_price)
-                    stop = peak - atr_stop_mult * atr
-                    if price < stop:
-                        logger.info(
-                            "ATR trailing stop (long)",
-                            extra={
-                                "symbol": symbol,
-                                "peak": peak,
-                                "stop": stop,
-                                "price": price,
-                            },
-                        )
-                        return await self._close_position(
-                            symbol, price, reason="atr_stop"
-                        )
-                elif current_direction < 0:  # short
+                    if current_direction > 0:  # long
+                        peak = self.signal_state.peak_prices.get(symbol, entry_price)
+                        stop = peak - atr_stop_mult * atr
+                        if price < stop:
+                            logger.info(
+                                "ATR trailing stop (long)",
+                                extra={
+                                    "symbol": symbol,
+                                    "peak": peak,
+                                    "stop": stop,
+                                    "price": price,
+                                },
+                            )
+                            return await self._close_position(
+                                symbol, price, reason="atr_stop"
+                            )
+                    elif current_direction < 0:  # short
                     trough = self.signal_state.trough_prices.get(symbol, entry_price)
                     stop = trough + atr_stop_mult * atr
                     if price > stop:
