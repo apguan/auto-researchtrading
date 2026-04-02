@@ -512,12 +512,7 @@ class TradingBot:
     def _get_current_atr(self, symbol: str) -> float:
         if not self.strategy:
             return 0.0
-        strategy = (
-            self.strategy._strategy if hasattr(self.strategy, "_strategy") else None
-        )
-        if strategy and hasattr(strategy, "atr_at_entry"):
-            return strategy.atr_at_entry.get(symbol, 0.0)
-        return 0.0
+        return self.strategy.get_atr_at_entry(symbol)
 
     async def _check_hourly_summary(self, account_state: AccountState):
         assert self.metrics is not None

@@ -298,7 +298,7 @@ class Database:
         )
         return [self._row_to_snapshot(row) for row in rows]
 
-    async def get_latest_params(self, period: str = "15m") -> Optional[ParamSnapshot]:
+    async def get_latest_params(self, period: str = "1h") -> Optional[ParamSnapshot]:
         row = await self.pool.fetchrow(
             "SELECT * FROM param_snapshots WHERE is_active = TRUE AND period = $1 ORDER BY run_date DESC LIMIT 1",
             period,
