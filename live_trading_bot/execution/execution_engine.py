@@ -1,13 +1,5 @@
 import time
-import sys
-from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
-
-# Import strategy module for stop/take-profit constants
-_repo_root = Path(__file__).resolve().parent.parent.parent
-if str(_repo_root) not in sys.path:
-    sys.path.append(str(_repo_root))
-import strategy as _strategy
 
 from ..execution.signal_state import SignalState
 from ..exchange.interface import Exchange
@@ -157,7 +149,7 @@ class ExecutionEngine:
             # Priority 2: ATR trailing stop
             atr = self.signal_state.signal_atr.get(symbol, 0.0)
             if atr > 0:
-                atr_stop_mult = _strategy.ATR_STOP_MULT
+                atr_stop_mult = self.settings.ATR_STOP_MULT
 
                 if current_direction > 0:  # long
                     peak = self.signal_state.peak_prices.get(symbol, entry_price)
@@ -198,7 +190,7 @@ class ExecutionEngine:
             else:  # short
                 pnl_pct = (entry_price - price) / entry_price
 
-            if pnl_pct >= _strategy.TAKE_PROFIT_PCT:
+            if pnl_pct >= self.settings.TAKE_PROFIT_PCT:
                 logger.info(
                     "Take profit triggered",
                     extra={
@@ -459,15 +451,16 @@ class ExecutionEngine:
 
         self._closing.add(symbol)
 
-        order = await self.client.place_order(
-            symbol=symbol,
-            side=close_side,
-            size=round(current_size, 8),
-            order_type=OrderType.MARKET,
-            reduce_only=True,
-        )
-
-        self._closing.discard(symbol)
+        try:
+            order = await self.client.place_order(
+                symbol=symbol,
+                side=close_side,
+                size=round(current_size, 8),
+                order_type=OrderType.MARKET,
+                reduce_only=True,
+            )
+        finally:
+            self._closing.discard(symbol)
 
         if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             self._position_sizes[symbol] = 0.0

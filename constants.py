@@ -27,16 +27,14 @@ INTERVAL_SYMBOLS: dict[str, list[str]] = {
 
 BENCHMARK_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
 
-DEFAULT_SYMBOL_WEIGHT = 0.25
-
-
 def make_equal_weights(
     symbols: list[str] | None = None,
 ) -> dict[str, float]:
-    """Create equal-weight dict for given symbols."""
+    """Create equal-weight dict for given symbols (1/N each)."""
     if symbols is None:
         symbols = ALL_SYMBOLS
-    return {s: DEFAULT_SYMBOL_WEIGHT for s in symbols}
+    w = 1.0 / len(symbols)
+    return {s: w for s in symbols}
 
 
 # ---------------------------------------------------------------------------
@@ -63,17 +61,11 @@ VALID_INTERVALS = list(INTERVAL_MINUTES.keys())
 
 # Used by live_trading_bot/config/settings.py (production lookback)
 LOOKBACK_BARS: dict[str, int] = {
-    "1m": 1000,
-    "5m": 1000,
-    "15m": 500,
     "1h": 500,
 }
 
 # Used by data_pipeline/backtest/backtest_interval.py (backtest lookback)
 BACKTEST_LOOKBACK_BARS: dict[str, int] = {
-    "1m": 1500,
-    "5m": 1500,
-    "15m": 500,
     "1h": 500,
 }
 
@@ -137,62 +129,6 @@ UNIFORM_DEFAULTS: dict[str, int | float] = {
 # Each interval's dict merges its interval-specific params with UNIFORM_DEFAULTS.
 # Later keys override earlier keys (e.g. 1m's ATR_STOP_MULT=6.5 beats uniform 5.5).
 STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
-    "15m": {
-        "SHORT_WINDOW": 24,
-        "MED_WINDOW": 48,
-        "MED2_WINDOW": 96,
-        "LONG_WINDOW": 144,
-        "EMA_FAST": 28,
-        "EMA_SLOW": 104,
-        "RSI_PERIOD": 32,
-        "BB_PERIOD": 28,
-        "MACD_FAST": 56,
-        "MACD_SLOW": 92,
-        "MACD_SIGNAL": 36,
-        "ATR_LOOKBACK": 96,
-        "VOL_LOOKBACK": 144,
-        "BASE_POSITION_PCT": 0.08,
-        "COOLDOWN_BARS": 8,
-        "ATR_STOP_MULT": 5.5,
-        **UNIFORM_DEFAULTS,
-    },
-    "1m": {
-        "SHORT_WINDOW": 60,
-        "MED_WINDOW": 240,
-        "MED2_WINDOW": 480,
-        "LONG_WINDOW": 720,
-        "EMA_FAST": 60,
-        "EMA_SLOW": 240,
-        "RSI_PERIOD": 60,
-        "BB_PERIOD": 60,
-        "MACD_FAST": 120,
-        "MACD_SLOW": 240,
-        "MACD_SIGNAL": 60,
-        "ATR_LOOKBACK": 120,
-        "VOL_LOOKBACK": 240,
-        "BASE_POSITION_PCT": 2.00,
-        "COOLDOWN_BARS": 60,
-        "ATR_STOP_MULT": 6.5,
-        **UNIFORM_DEFAULTS,
-    },
-    "5m": {
-        "SHORT_WINDOW": 72,
-        "MED_WINDOW": 144,
-        "MED2_WINDOW": 288,
-        "LONG_WINDOW": 432,
-        "EMA_FAST": 60,
-        "EMA_SLOW": 240,
-        "RSI_PERIOD": 60,
-        "BB_PERIOD": 60,
-        "MACD_FAST": 120,
-        "MACD_SLOW": 240,
-        "MACD_SIGNAL": 60,
-        "ATR_LOOKBACK": 120,
-        "VOL_LOOKBACK": 240,
-        "BASE_POSITION_PCT": 0.50,
-        "COOLDOWN_BARS": 12,
-        **UNIFORM_DEFAULTS,
-    },
     "1h": {
         "SHORT_WINDOW": 6,
         "MED_WINDOW": 12,
@@ -209,7 +145,7 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "ATR_STOP_MULT": 5.5,
         "VOL_LOOKBACK": 36,
         "BASE_POSITION_PCT": 0.088,
-        "COOLDOWN_BARS": 2,
+        "COOLDOWN_BARS": 3,
         **UNIFORM_DEFAULTS,
     },
 }
