@@ -28,7 +28,6 @@ def _make_filled_order(symbol="BTC", side=OrderSide.BUY, size=0.1, price=50000.0
 @pytest.fixture
 def settings():
     return Settings(
-        TICK_EXECUTION_ENABLED=True,
         ENTRY_SLIPPAGE_PCT=0.02,
         EXECUTION_COOLDOWN_MS=100,
         EMERGENCY_EXIT_PCT=0.10,
@@ -51,7 +50,9 @@ class TestExecutionEngine:
     @pytest.mark.asyncio
     async def test_entry_on_signal(self, settings, signal_state, mock_client):
         engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine.set_equity(100000.0)
         signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+        signal_state.momentum["BTC"] = 0.05
         order = await engine.on_tick("BTC", 50000.0)
         assert order is not None
         assert mock_client.place_order.called
@@ -60,7 +61,9 @@ class TestExecutionEngine:
     @pytest.mark.asyncio
     async def test_no_entry_on_stale_signal(self, settings, signal_state, mock_client):
         engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine.set_equity(100000.0)
         signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+        signal_state.momentum["BTC"] = 0.05
         order = await engine.on_tick("BTC", 52000.0)
         assert order is None
         assert not mock_client.place_order.called
@@ -134,7 +137,9 @@ class TestExecutionEngine:
         self, settings, signal_state, mock_client
     ):
         engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine.set_equity(100000.0)
         signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
+        signal_state.momentum["BTC"] = 0.05
         await engine.on_tick("BTC", 50000.0)
         mock_client.place_order.reset_mock()
         order = await engine.on_tick("BTC", 50001.0)
