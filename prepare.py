@@ -289,15 +289,19 @@ def download_data(symbols=None):
 
 def load_data(split: str = "val") -> dict:
     """Load OHLCV+funding data for the given split. Returns {symbol: DataFrame}."""
-    splits = {
-        "train": (TRAIN_START, TRAIN_END),
-        "val": (VAL_START, VAL_END),
-        "test": (TEST_START, TEST_END),
-    }
-    assert split in splits, f"split must be one of {list(splits.keys())}"
-    start_str, end_str = splits[split]
-    start_ms = pd.Timestamp(start_str, tz="UTC").value // 1_000_000
-    end_ms = pd.Timestamp(end_str, tz="UTC").value // 1_000_000
+    if os.environ.get("DAILY_MODE", "").lower() in ("1", "true", "yes"):
+        start_ms = 0
+        end_ms = float("inf")
+    else:
+        splits = {
+            "train": (TRAIN_START, TRAIN_END),
+            "val": (VAL_START, VAL_END),
+            "test": (TEST_START, TEST_END),
+        }
+        assert split in splits, f"split must be one of {list(splits.keys())}"
+        start_str, end_str = splits[split]
+        start_ms = pd.Timestamp(start_str, tz="UTC").value // 1_000_000
+        end_ms = pd.Timestamp(end_str, tz="UTC").value // 1_000_000
 
     result = {}
     for symbol in SYMBOLS:
@@ -305,8 +309,11 @@ def load_data(split: str = "val") -> dict:
         if not os.path.exists(filepath):
             continue
         df = pd.read_parquet(filepath)
-        mask = (df["timestamp"] >= start_ms) & (df["timestamp"] < end_ms)
-        split_df = df[mask].reset_index(drop=True)
+        if start_ms > 0:
+            mask = (df["timestamp"] >= start_ms) & (df["timestamp"] < end_ms)
+            split_df = df[mask].reset_index(drop=True)
+        else:
+            split_df = df
         if len(split_df) > 0:
             result[symbol] = split_df
     return result
