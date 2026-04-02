@@ -23,7 +23,7 @@ class Settings:
     BAR_INTERVAL: str = "1h"
     LOOKBACK_BARS: int = 500
 
-    BASE_POSITION_PCT: float = 0.08
+    BASE_POSITION_PCT: float = float(_HOUR_DEFAULTS["BASE_POSITION_PCT"])
     MAX_POSITION_PCT: float = 0.30
     MAX_LEVERAGE: float = 3.0
 
@@ -31,7 +31,7 @@ class Settings:
     VOLATILITY_CIRCUIT_BREAKER_PCT: float = 0.05
     VOLATILITY_LOOKBACK_MINUTES: int = 10
 
-    COOLDOWN_BARS: int = 2
+    COOLDOWN_BARS: int = int(_HOUR_DEFAULTS["COOLDOWN_BARS"])
     MIN_VOTES: int = 4
 
     SHORT_WINDOW: int = int(_HOUR_DEFAULTS["SHORT_WINDOW"])
@@ -51,6 +51,7 @@ class Settings:
     BB_PERIOD: int = int(_HOUR_DEFAULTS["BB_PERIOD"])
     ATR_LOOKBACK: int = int(_HOUR_DEFAULTS["ATR_LOOKBACK"])
     ATR_STOP_MULT: float = float(_HOUR_DEFAULTS["ATR_STOP_MULT"])
+    TAKE_PROFIT_PCT: float = float(_HOUR_DEFAULTS["TAKE_PROFIT_PCT"])
     TARGET_VOL: float = float(_HOUR_DEFAULTS["TARGET_VOL"])
     VOL_LOOKBACK: int = int(_HOUR_DEFAULTS["VOL_LOOKBACK"])
     BASE_THRESHOLD: float = float(_HOUR_DEFAULTS["BASE_THRESHOLD"])
