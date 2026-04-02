@@ -3,7 +3,7 @@
 Centralises duplicated logic from daily_tune.py and sliding_window_tune.py:
 - Path setup (auto-runs on import)
 - Logging configuration
-- 15m candle data download with cache fallback
+- Candle data download with cache fallback
 - Period string computation
 - Best-result selection
 - Supabase param_snapshots persistence
@@ -70,7 +70,7 @@ def setup_logging(name: str, log_prefix: str) -> logging.Logger:
 # ---------------------------------------------------------------------------
 # Data download
 # ---------------------------------------------------------------------------
-def download_15m_data(
+def download_data(
     hours_back: int = 1300,
     interval: str = "15m",
     logger: logging.Logger | None = None,
@@ -182,111 +182,6 @@ def find_best_result(results: list[dict]) -> dict | None:
 # ---------------------------------------------------------------------------
 # Database persistence
 # ---------------------------------------------------------------------------
-def save_snapshots_to_db(
-    snapshots: list[dict],
-    is_active: bool = True,
-) -> int:
-    """Save parameter snapshots to param_snapshots.
-
-    Args:
-        snapshots: list of dicts, each with:
-            - symbol (str)
-            - params (dict): param overrides to merge with DEFAULTS
-            - score (float): overall score for this snapshot
-            - sweep_name (str, optional): label for the sweep/source
-            - period (str, optional): date range string
-            - sharpe, total_return_pct, max_drawdown_pct, profit_factor,
-              win_rate_pct, num_trades, ret_dd_ratio (float, optional)
-        is_active: if True, deactivates existing active snapshots and marks
-                   new ones as active. If False, inserts as inactive.
-
-    Returns:
-        Number of rows inserted.
-    """
-    import psycopg2
-    from backtest.tune_15m import DEFAULTS
-
-    log = logging.getLogger("param_snapshots")
-
-    db_url = os.environ.get("SUPABASE_DB_URL", "")
-    if not db_url:
-        log.warning("save_snapshots_to_db: SUPABASE_DB_URL not set, skipping")
-        return 0
-
-    PARAM_COLUMNS = list(DEFAULTS.keys())
-    conn = None
-    try:
-        conn = psycopg2.connect(db_url)
-        cur = conn.cursor()
-
-        if is_active:
-            cur.execute(
-                "SELECT id FROM param_snapshots WHERE is_active = TRUE "
-                "ORDER BY run_date DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            prev_id = row[0] if row else None
-
-            cur.execute(
-                "UPDATE param_snapshots SET is_active = FALSE WHERE is_active = TRUE"
-            )
-        else:
-            prev_id = None
-
-        cols = (
-            "run_date, sweep_name, sharpe, total_return_pct, "
-            "max_drawdown_pct, profit_factor, win_rate_pct, "
-            "num_trades, ret_dd_ratio, is_best, is_active, period, "
-            "previous_snapshot_id, symbol, " + ", ".join(PARAM_COLUMNS)
-        )
-        placeholders = ", ".join(["%s"] * (14 + len(PARAM_COLUMNS)))
-
-        run_date = datetime.now(timezone.utc).isoformat()
-        inserted = 0
-
-        for snap in snapshots:
-            symbol = snap.get("symbol", "PORTFOLIO")
-            params = dict(DEFAULTS)
-            params.update(snap.get("params", {}))
-
-            values = [
-                run_date,
-                snap.get("sweep_name", "daily_tune"),
-                float(snap.get("sharpe", 0)),
-                float(snap.get("total_return_pct", 0)),
-                float(snap.get("max_drawdown_pct", 0)),
-                float(snap.get("profit_factor", 0)),
-                float(snap.get("win_rate_pct", 0)),
-                float(snap.get("num_trades", 0)),
-                float(snap.get("ret_dd_ratio", 0)),
-                snap.get("is_best", True),
-                is_active,
-                snap.get("period", ""),
-                prev_id,
-                symbol,
-            ]
-            for p in PARAM_COLUMNS:
-                values.append(float(params.get(p, DEFAULTS.get(p, 0))))
-
-            cur.execute(
-                f"INSERT INTO param_snapshots ({cols}) VALUES ({placeholders})",
-                values,
-            )
-            inserted += 1
-
-        conn.commit()
-        return inserted
-    except Exception as exc:
-        log.warning("save_snapshots_to_db failed: %s", exc)
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        return 0
-    finally:
-        if conn:
-            conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +206,7 @@ def run_optimization_pipeline(
     Returns:
         ``(best_params, all_validated_results, wf_result_or_None)``
     """
-    from backtest.tune_15m import (
+    from backtest.tune_1h import (
         DEFAULTS,
         SINGLE_SWEEPS,
         SECONDARY_SWEEPS,
