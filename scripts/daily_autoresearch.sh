@@ -76,15 +76,18 @@ Rules:
 - Run 'uv run backtest.py > run.log 2>&1' and parse results from run.log
 - After each experiment, record in results.tsv
 - ALWAYS save to DB (both wins and losses):
-  - If score IMPROVES: keep the commit, then: uv run python scripts/save_to_db.py run.log '<description>' PASS
-  - If score is equal or worse: save first, then revert: uv run python scripts/save_to_db.py run.log '<description>' FAIL && git reset --hard HEAD~1
+  uv run python scripts/save_to_db.py run.log '<description>' PASS
+  (use PASS if score improved over baseline, FAIL otherwise)
+- ALWAYS revert after saving:
+  git reset --hard HEAD~1
+  (strategy.py must return to harness state for next experiment)
 - Do NOT stop until you have completed $BATCH_COUNT experiments
 
 Run $BATCH_COUNT experiments now. Do not ask questions. Be autonomous."
         opencode run "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
     else
         PROMPT="Continue the autoresearch loop. Run $BATCH_COUNT more experiments.
-Same rules as before — save EVERY experiment to DB (PASS or FAIL), then revert failures.
+Same rules — save EVERY experiment to DB, then ALWAYS revert.
 Do not stop until $BATCH_COUNT experiments are done."
         opencode run -c "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
     fi
@@ -92,7 +95,11 @@ Do not stop until $BATCH_COUNT experiments are done."
     log "Batch $batch done."
 done
 
-# ── 4. Summary ─────────────────────────────────────────────────
+# ── 4. Promote best experiment ─────────────────────────────────
+log "Promoting best PASS experiment to active..."
+uv run python scripts/promote_best.py >> "$LOG_FILE" 2>&1 || log "WARNING: promote_best.py failed"
+
+# ── 5. Summary ─────────────────────────────────────────────────
 BEST=$(tail -n +2 results.tsv | sort -t$'\t' -k2 -rn | head -1)
 log "=== DAILY AUTORESEARCH COMPLETE ==="
 log "Best result: $BEST"
