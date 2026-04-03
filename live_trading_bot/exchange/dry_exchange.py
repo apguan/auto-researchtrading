@@ -1,13 +1,6 @@
-"""Dry-run exchange — simulated order execution with real market data.
-
-Tracks positions internally so that get_account_state() returns accurate
-simulated equity and positions. Read-only market data (prices, candles,
-funding rates) is fetched from the real Hyperliquid API.
-"""
-
 import asyncio
 import time
-from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from eth_account import Account
@@ -23,6 +16,7 @@ from .types import (
     Position,
     PositionSide,
 )
+from .dry_run_ledger import DryRunLedger
 from .hyperliquid import fetch_candles_paginated
 from ..config import get_settings
 from ..monitoring.logger import get_logger
@@ -30,22 +24,7 @@ from ..monitoring.logger import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass
-class _SimPosition:
-    symbol: str
-    is_long: bool
-    size: float  # coin qty, always positive
-    entry_price: float
-
-
 class DryExchange:
-    """Simulated exchange for dry-run mode.
-
-    - Orders fill instantly at current mid price
-    - Positions are tracked internally with realized/unrealized PnL
-    - Market data comes from the real Hyperliquid API
-    """
-
     def __init__(self, private_key: str):
         self.settings = get_settings()
         self.account = Account.from_key(private_key)
@@ -59,25 +38,24 @@ class DryExchange:
         )
         self._nonce_counter = int(time.time() * 1000)
 
-        # Simulated state
-        self._initial_equity = self.settings.DRY_RUN_INITIAL_CAPITAL
-        self._realized_pnl: float = 0.0
-        self._positions: Dict[str, _SimPosition] = {}
+        self.ledger = DryRunLedger(
+            path=self.settings.DRY_RUN_STATE_PATH,
+            initial_equity=self.settings.DRY_RUN_INITIAL_CAPITAL,
+        )
+        self.ledger.load()
 
     def _get_nonce(self) -> int:
         self._nonce_counter += 1
         return self._nonce_counter
-
-    # ── Account state ──────────────────────────────────────────────
 
     async def get_account_state(self) -> AccountState:
         positions: Dict[str, Position] = {}
         unrealized_pnl = 0.0
         total_margin = 0.0
 
-        if self._positions:
+        if self.ledger.positions:
             prices = await self.get_all_mid_prices()
-            for symbol, sim in self._positions.items():
+            for symbol, sim in self.ledger.positions.items():
                 current_price = prices.get(symbol, sim.entry_price)
                 if sim.is_long:
                     upnl = (current_price - sim.entry_price) * sim.size
@@ -100,7 +78,7 @@ class DryExchange:
                     liquidation_price=None,
                 )
 
-        total_equity = self._initial_equity + self._realized_pnl + unrealized_pnl
+        total_equity = self.ledger.initial_equity + self.ledger.realized_pnl + unrealized_pnl
 
         return AccountState(
             wallet_address=self.query_address,
@@ -111,8 +89,6 @@ class DryExchange:
             positions=positions,
         )
 
-    # ── Prices ─────────────────────────────────────────────────────
-
     async def get_mid_price(self, symbol: str) -> float:
         mids = await asyncio.to_thread(self._info.all_mids)
         return float(mids.get(symbol, "0"))
@@ -121,8 +97,6 @@ class DryExchange:
         mids = await asyncio.to_thread(self._info.all_mids)
         return {symbol: float(px) for symbol, px in mids.items()}
 
-    # ── Leverage (no-op) ───────────────────────────────────────────
-
     async def set_leverage(self, symbol: str, leverage: int) -> None:
         pass
 
@@ -130,8 +104,6 @@ class DryExchange:
         self, symbols: List[str], leverage: int
     ) -> None:
         pass
-
-    # ── Orders ─────────────────────────────────────────────────────
 
     async def place_order(
         self,
@@ -144,6 +116,7 @@ class DryExchange:
     ) -> Order:
         fill_price = price or await self.get_mid_price(symbol)
         self._apply_fill(symbol, side, size, fill_price, reduce_only)
+        self.ledger.save()
 
         return Order(
             id=f"dry-{self._get_nonce()}",
@@ -186,18 +159,24 @@ class DryExchange:
         fill_price: float,
         reduce_only: bool,
     ) -> None:
-        pos = self._positions.get(symbol)
+        pos = self.ledger.positions.get(symbol)
         is_buy = side == OrderSide.BUY
+        now = datetime.now(timezone.utc).isoformat()
 
         if pos is None:
             if reduce_only:
                 return
-            self._positions[symbol] = _SimPosition(
-                symbol=symbol,
-                is_long=is_buy,
-                size=size,
-                entry_price=fill_price,
-            )
+            self.ledger.open_position(symbol, is_buy, size, fill_price)
+            self.ledger.record_transaction({
+                "timestamp": now,
+                "symbol": symbol,
+                "action": "open_long" if is_buy else "open_short",
+                "side": "buy" if is_buy else "sell",
+                "size": size,
+                "price": fill_price,
+                "pnl": 0.0,
+                "realized_pnl_cumulative": self.ledger.realized_pnl,
+            })
             return
 
         is_closing = (pos.is_long and not is_buy) or (
@@ -210,41 +189,63 @@ class DryExchange:
                 pnl = (fill_price - pos.entry_price) * close_size
             else:
                 pnl = (pos.entry_price - fill_price) * close_size
-            self._realized_pnl += pnl
+            self.ledger.add_realized_pnl(pnl)
 
             remaining = pos.size - close_size
             if remaining < 1e-10:
-                del self._positions[symbol]
+                self.ledger.close_position(symbol)
+                self.ledger.record_transaction({
+                    "timestamp": now,
+                    "symbol": symbol,
+                    "action": "close",
+                    "side": "buy" if is_buy else "sell",
+                    "size": close_size,
+                    "price": fill_price,
+                    "pnl": round(pnl, 10),
+                    "realized_pnl_cumulative": round(self.ledger.realized_pnl, 10),
+                })
             else:
-                self._positions[symbol] = _SimPosition(
-                    symbol=symbol,
-                    is_long=pos.is_long,
-                    size=remaining,
-                    entry_price=pos.entry_price,
-                )
+                self.ledger.update_position(symbol, remaining, pos.entry_price)
+                self.ledger.record_transaction({
+                    "timestamp": now,
+                    "symbol": symbol,
+                    "action": "partial_close",
+                    "side": "buy" if is_buy else "sell",
+                    "size": close_size,
+                    "price": fill_price,
+                    "pnl": round(pnl, 10),
+                    "realized_pnl_cumulative": round(self.ledger.realized_pnl, 10),
+                })
 
             leftover = size - close_size
             if leftover > 1e-10 and not reduce_only:
-                self._positions[symbol] = _SimPosition(
-                    symbol=symbol,
-                    is_long=is_buy,
-                    size=leftover,
-                    entry_price=fill_price,
-                )
+                self.ledger.open_position(symbol, is_buy, leftover, fill_price)
+                self.ledger.record_transaction({
+                    "timestamp": now,
+                    "symbol": symbol,
+                    "action": "open_long" if is_buy else "open_short",
+                    "side": "buy" if is_buy else "sell",
+                    "size": leftover,
+                    "price": fill_price,
+                    "pnl": 0.0,
+                    "realized_pnl_cumulative": round(self.ledger.realized_pnl, 10),
+                })
         else:
-            # Adding to same direction
             total_size = pos.size + size
             avg_price = (
                 pos.entry_price * pos.size + fill_price * size
             ) / total_size
-            self._positions[symbol] = _SimPosition(
-                symbol=symbol,
-                is_long=pos.is_long,
-                size=total_size,
-                entry_price=avg_price,
-            )
-
-    # ── Cancel (no-op) ─────────────────────────────────────────────
+            self.ledger.update_position(symbol, total_size, avg_price)
+            self.ledger.record_transaction({
+                "timestamp": now,
+                "symbol": symbol,
+                "action": "add_to_position",
+                "side": "buy" if is_buy else "sell",
+                "size": size,
+                "price": fill_price,
+                "pnl": 0.0,
+                "realized_pnl_cumulative": self.ledger.realized_pnl,
+            })
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         return True
@@ -252,22 +253,16 @@ class DryExchange:
     async def cancel_all_orders(self, symbol: Optional[str] = None) -> bool:
         return True
 
-    # ── Open orders ────────────────────────────────────────────────
-
     async def get_open_orders(
         self, symbol: Optional[str] = None
     ) -> List[Order]:
         return []
-
-    # ── Fills & funding history ─────────────────────────────────────
 
     async def get_user_fills(self, start_time: int, end_time: int) -> list[dict]:
         return []
 
     async def get_funding_history(self, start_time: int, end_time: int | None = None) -> list[dict]:
         return []
-
-    # ── Market data ────────────────────────────────────────────────
 
     async def get_funding_rate(self, symbol: str) -> float:
         result = await asyncio.to_thread(self._info.meta_and_asset_ctxs)
