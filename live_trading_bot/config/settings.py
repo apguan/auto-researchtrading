@@ -79,6 +79,8 @@ class Settings:
     VOLATILITY_LOOKBACK_MINUTES: int = 10
 
     COOLDOWN_BARS: int = int(_HOUR_DEFAULTS["COOLDOWN_BARS"])
+    EXIT_CONVICTION_BARS: int = int(_HOUR_DEFAULTS["EXIT_CONVICTION_BARS"])
+    MIN_HOLD_BARS: int = int(_HOUR_DEFAULTS["MIN_HOLD_BARS"])
     MIN_VOTES: int = 4
 
     SHORT_WINDOW: int = int(_HOUR_DEFAULTS["SHORT_WINDOW"])
@@ -197,6 +199,12 @@ class Settings:
 
         if val := os.getenv("EXECUTION_COOLDOWN_MS"):
             settings.EXECUTION_COOLDOWN_MS = int(val)
+
+        if val := os.getenv("EXIT_CONVICTION_BARS"):
+            settings.EXIT_CONVICTION_BARS = int(val)
+
+        if val := os.getenv("MIN_HOLD_BARS"):
+            settings.MIN_HOLD_BARS = int(val)
 
         if val := os.getenv("EMERGENCY_EXIT_PCT"):
             settings.EMERGENCY_EXIT_PCT = float(val)

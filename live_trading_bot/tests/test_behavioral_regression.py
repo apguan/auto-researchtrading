@@ -52,6 +52,8 @@ def settings():
         EXECUTION_COOLDOWN_MS=0,
         EMERGENCY_EXIT_PCT=0.10,
         COOLDOWN_BARS=2,
+        EXIT_CONVICTION_BARS=1,
+        MIN_HOLD_BARS=0,
     )
 
 

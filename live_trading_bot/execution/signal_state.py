@@ -34,6 +34,12 @@ class SignalState:
     # symbol -> bar_count when position was closed by execution engine
     last_exit_bar: Dict[str, int] = field(default_factory=dict)
 
+    # symbol -> consecutive flat bar count (for exit conviction)
+    flat_count: Dict[str, int] = field(default_factory=dict)
+
+    # symbol -> bar_count when position was opened (for minimum hold period)
+    entry_bar: Dict[str, int] = field(default_factory=dict)
+
     def set_direction(
         self,
         symbol: str,
@@ -56,9 +62,11 @@ class SignalState:
 
         if direction == 0:
             self.target_positions[symbol] = 0.0
+            self.flat_count[symbol] = self.flat_count.get(symbol, 0) + 1
             self.clear_signal(symbol)
         else:
             self.target_positions[symbol] = float(direction)
+            self.flat_count[symbol] = 0
             self.peak_prices[symbol] = entry_price
             self.trough_prices[symbol] = entry_price
 
