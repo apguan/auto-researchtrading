@@ -107,6 +107,14 @@ PARAM_COLUMNS: list[str] = [
     "MIN_VOTES",
 ]
 
+INT_PARAMS: set[str] = {
+    "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
+    "EMA_FAST", "EMA_SLOW", "RSI_PERIOD",
+    "MACD_FAST", "MACD_SLOW",
+    "MACD_SIGNAL", "BB_PERIOD",
+    "VOL_LOOKBACK", "ATR_LOOKBACK", "COOLDOWN_BARS", "MIN_VOTES",
+}
+
 
 # ---------------------------------------------------------------------------
 # Uniform Strategy Defaults — same value across ALL intervals
@@ -145,7 +153,7 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "ATR_STOP_MULT": 5.5,
         "VOL_LOOKBACK": 36,
         "BASE_POSITION_PCT": 0.088,
-        "COOLDOWN_BARS": 3,
+        "COOLDOWN_BARS": 0,
         **UNIFORM_DEFAULTS,
     },
 }
