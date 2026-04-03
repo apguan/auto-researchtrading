@@ -10,8 +10,55 @@ if str(_REPO_ROOT) not in sys.path:
 
 from constants import ALL_SYMBOLS, INTERVAL_SYMBOLS, make_equal_weights, LOOKBACK_BARS
 from constants import STRATEGY_DEFAULTS as _STRATEGY_DEFAULTS
+from constants import PARAM_COLUMNS, INT_PARAMS as _INT_PARAMS
 
 _HOUR_DEFAULTS = _STRATEGY_DEFAULTS["1h"]
+
+
+def _load_active_db_params() -> dict[str, int | float]:
+    """Load the active 1h params from param_snapshots (is_active=TRUE).
+
+    Returns a dict of param_name -> value, or empty dict on any failure.
+    This is the single DB query that feeds both the Settings layer AND
+    strategy.py globals — no split-brain.
+    """
+    db_url = os.environ.get("SUPABASE_DB_URL", "")
+    if not db_url:
+        return {}
+
+    try:
+        import psycopg2
+
+        with psycopg2.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                select_cols = ", ".join(PARAM_COLUMNS)
+                cur.execute(
+                    f"SELECT {select_cols} "
+                    "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
+                    "ORDER BY run_date DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {}
+
+                params: dict[str, int | float] = {}
+                for name, val in zip(PARAM_COLUMNS, row):
+                    if name in _INT_PARAMS:
+                        params[name] = int(val)
+                    else:
+                        params[name] = float(val)
+
+                from live_trading_bot.monitoring.logger import get_logger
+
+                get_logger(__name__).info(
+                    "Loaded strategy params from DB",
+                    extra={"param_count": len(params)},
+                )
+                return params
+    except Exception:
+        from live_trading_bot.monitoring.logger import get_logger
+        get_logger(__name__).warning("Failed to load params from DB — using defaults", exc_info=True)
+        return {}
 
 
 @dataclass
@@ -75,7 +122,8 @@ class Settings:
     ALERT_INSTANCE_NAME: str = ""
 
     DRY_RUN: bool = False
-    DRY_RUN_INITIAL_CAPITAL: float = 100_000.0
+    DRY_RUN_INITIAL_CAPITAL: float = 10_000.0
+    DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
 
     # Tick execution settings
     ENTRY_SLIPPAGE_PCT: float = 0.02
@@ -141,6 +189,9 @@ class Settings:
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
             settings.DRY_RUN_INITIAL_CAPITAL = float(val)
 
+        if val := os.getenv("DRY_RUN_STATE_PATH"):
+            settings.DRY_RUN_STATE_PATH = val
+
         if val := os.getenv("ENTRY_SLIPPAGE_PCT"):
             settings.ENTRY_SLIPPAGE_PCT = float(val)
 
@@ -174,10 +225,22 @@ class Settings:
         if val := os.getenv("ALERT_INSTANCE_NAME"):
             settings.ALERT_INSTANCE_NAME = val
 
+        _apply_db_params(settings)
+
         return settings
 
 
 _settings: Settings | None = None
+
+
+def _apply_db_params(settings: Settings) -> None:
+    db_params = _load_active_db_params()
+    if not db_params:
+        return
+
+    for name, val in db_params.items():
+        if hasattr(settings, name):
+            setattr(settings, name, val)
 
 
 def get_settings() -> Settings:
