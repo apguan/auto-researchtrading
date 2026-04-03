@@ -154,6 +154,8 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "VOL_LOOKBACK": 36,
         "BASE_POSITION_PCT": 0.088,
         "COOLDOWN_BARS": 0,
+        "EXIT_CONVICTION_BARS": 2,
+        "MIN_HOLD_BARS": 2,
         **UNIFORM_DEFAULTS,
     },
 }

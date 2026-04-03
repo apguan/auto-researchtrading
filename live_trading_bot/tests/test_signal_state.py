@@ -73,3 +73,17 @@ class TestSignalState:
 
         s.bar_count = 13
         assert s.is_in_cooldown("BTC", 3) is False
+
+    def test_flat_count_increments_on_flat_direction(self):
+        s = SignalState()
+        s.set_direction("BTC", 0, 0.0, 50.0, 50000.0, bar_count=1)
+        assert s.flat_count["BTC"] == 1
+        s.set_direction("BTC", 0, 0.0, 50.0, 50000.0, bar_count=2)
+        assert s.flat_count["BTC"] == 2
+
+    def test_flat_count_resets_on_nonflat_direction(self):
+        s = SignalState()
+        s.set_direction("BTC", 0, 0.0, 50.0, 50000.0, bar_count=1)
+        assert s.flat_count["BTC"] == 1
+        s.set_direction("BTC", 1, 0.05, 50.0, 50000.0, bar_count=2)
+        assert s.flat_count["BTC"] == 0

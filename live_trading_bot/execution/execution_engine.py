@@ -204,19 +204,25 @@ class ExecutionEngine:
                     symbol, price, reason="take_profit"
                 )
 
-        # Priority 4: Signal flip to flat — target is flat but we have a position
-        if current_size > 0 and target_direction == 0:
-            logger.info(
-                "Signal flip to flat",
-                extra={"symbol": symbol, "from_direction": current_direction},
-            )
-            return await self._close_position(symbol, price, reason="signal_flat")
+        bars_held = self.signal_state.bar_count - self.signal_state.entry_bar.get(symbol, 0)
+        min_hold_active = bars_held < self.settings.MIN_HOLD_BARS
+
+        # Priority 4: Signal flip to flat — require EXIT_CONVISTION_BARS consecutive flat bars
+        if current_size > 0 and target_direction == 0 and not min_hold_active:
+            flat_bars = self.signal_state.flat_count.get(symbol, 0)
+            if flat_bars >= self.settings.EXIT_CONVICTION_BARS:
+                logger.info(
+                    "Signal flip to flat",
+                    extra={"symbol": symbol, "from_direction": current_direction, "flat_bars": flat_bars},
+                )
+                return await self._close_position(symbol, price, reason="signal_flat")
 
         # Priority 5: Signal reversal — close now, re-enter on next tick (Option A)
         if (
             current_size > 0
             and target_direction != 0
             and target_direction != current_direction
+            and not min_hold_active
         ):
             self._pending_reversal[symbol] = target_direction
             logger.info(
@@ -345,6 +351,7 @@ class ExecutionEngine:
                     self._position_sizes[symbol] = order.filled_size
                     self._entry_prices[symbol] = order.avg_fill_price or price
                     self._last_executed_direction[symbol] = effective_direction
+                    self.signal_state.entry_bar[symbol] = self.signal_state.bar_count
 
                 self._last_execution_attempt[symbol] = now_ms
                 return order
@@ -474,6 +481,7 @@ class ExecutionEngine:
 
             # Record exit for bar-based cooldown tracking
             self.signal_state.record_exit(symbol, self.signal_state.bar_count)
+            self.signal_state.entry_bar.pop(symbol, None)
 
             # Notify bot to cancel exchange-side stop
             if self.on_position_closed:
@@ -515,14 +523,13 @@ class ExecutionEngine:
                 self._position_sizes[symbol] = pos.size
                 if pos.entry_price > 0:
                     self._entry_prices[symbol] = pos.entry_price
-                # Determine direction from the signal state
-                direction = self.signal_state.get_direction(symbol)
-                if direction != 0:
-                    self._last_executed_direction[symbol] = direction
-                elif self._last_executed_direction.get(symbol, 0) == 0:
-                    self._last_executed_direction[symbol] = (
-                        1 if pos.side == PositionSide.LONG else -1
-                    )
+                # Always use the position's actual side from the exchange.
+                # The signal direction is used by on_tick() exit logic to detect mismatches.
+                self._last_executed_direction[symbol] = (
+                    1 if pos.side == PositionSide.LONG else -1
+                )
+                if symbol not in self.signal_state.entry_bar:
+                    self.signal_state.entry_bar[symbol] = max(0, self.signal_state.bar_count - self.settings.MIN_HOLD_BARS)
             else:
                 if self._position_sizes.get(symbol, 0.0) > 0:
                     logger.info(
