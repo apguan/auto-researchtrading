@@ -43,6 +43,23 @@ from ..monitoring.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _sync_strategy_globals_from_settings() -> None:
+    settings = get_settings()
+    updated = 0
+    for name in _s_mod.ACTIVE_PARAMS:
+        if hasattr(settings, name):
+            current = _s_mod.__dict__.get(name)
+            db_val = getattr(settings, name)
+            if current is not None and db_val != current:
+                _s_mod.__dict__[name] = db_val
+                updated += 1
+    if updated:
+        logger.info(
+            "Synced strategy.py globals from DB params",
+            extra={"updated_count": updated},
+        )
+
+
 class LiveStrategyAdapter:
     """Wraps the backtest Strategy for live trading.
 
@@ -53,6 +70,7 @@ class LiveStrategyAdapter:
 
     def __init__(self):
         self._strategy = BacktestStrategy()
+        _sync_strategy_globals_from_settings()
 
     def on_bar(
         self,
