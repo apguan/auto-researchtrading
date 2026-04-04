@@ -1,9 +1,9 @@
 """
-Exp295: VOL_LOOKBACK=41 at new baseline.
+Exp302: TARGET_VOL=0.014 resweep at new baseline.
 
-Changes from exp293 (score 16.076):
-1. VOL_LOOKBACK=41 (was 40) — fine-tune.
-   Curve: 38=16.045, 40=16.076, 42=16.071. Peak near 40.
+Changes from exp295 (score 16.107):
+1. TARGET_VOL=0.014 (was 0.015) — lower volume threshold.
+   At old base: 0.014 lost ~0.10. Retest at 16.107.
 """
 
 import numpy as np
@@ -35,7 +35,7 @@ OBV_MA_PERIOD = 26
 
 BASE_POSITION_PCT = 0.060
 VOL_LOOKBACK = 41
-TARGET_VOL = 0.015
+TARGET_VOL = 0.014
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
 TAKE_PROFIT_PCT = 99.0
