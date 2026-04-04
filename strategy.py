@@ -1,9 +1,10 @@
 """
-Exp269: EMA_FAST=3 — even faster EMA crossover at new baseline.
+Exp275: RSI_BULL=41 RSI_BEAR=59 — slightly wider RSI entry zone at new baseline.
 
-Changes from exp268 (score 15.883):
-1. EMA_FAST=3 (was 4) — very fast EMA crossover.
-   EMA_FAST curve at old base: 3=15.568, 4=15.883(new). Continue sweeping.
+Changes from exp269 (score 15.932):
+1. RSI_BULL=41 (was 42) — easier long entry.
+2. RSI_BEAR=59 (was 58) — easier short entry.
+   At old base 41/59 lost -0.007. Retest at 15.932.
 """
 
 import numpy as np
@@ -21,8 +22,8 @@ LONG_WINDOW = 48
 EMA_FAST = 3
 EMA_SLOW = 27
 RSI_PERIOD = 7
-RSI_BULL = 42
-RSI_BEAR = 58
+RSI_BULL = 41
+RSI_BEAR = 59
 RSI_OVERBOUGHT = 74
 RSI_OVERSOLD = 26
 
