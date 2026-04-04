@@ -1,8 +1,9 @@
 """
-Exp163: Slightly longer OBV moving average.
+Exp233: MED_WINDOW=11 — faster momentum lookback.
 
-Changes from exp162 (score 15.5269):
-1. OBV_MA_PERIOD=25 (was 20) — smoother volume trend
+Changes from exp163 (score 15.638):
+1. MED_WINDOW=11 (was 12) — 11h return for momentum signal instead of 12h.
+   Slightly faster momentum detection.
 """
 
 import numpy as np
@@ -14,7 +15,7 @@ ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]
 SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 6
-MED_WINDOW = 12
+MED_WINDOW = 11
 MED2_WINDOW = 24
 LONG_WINDOW = 48
 EMA_FAST = 5
