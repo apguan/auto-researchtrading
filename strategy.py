@@ -1,8 +1,8 @@
 """
-Exp162: Continue shrinking position size further.
+Exp163: Slightly longer OBV moving average.
 
-Changes from exp161 (score 15.5267):
-1. BASE_POSITION_PCT=0.060 (was 0.065) — even smaller
+Changes from exp162 (score 15.5269):
+1. OBV_MA_PERIOD=25 (was 20) — smoother volume trend
 """
 
 import numpy as np
@@ -30,7 +30,7 @@ MACD_SLOW = 21
 MACD_SIGNAL = 9
 
 BB_PERIOD = 6
-OBV_MA_PERIOD = 20
+OBV_MA_PERIOD = 25
 
 BASE_POSITION_PCT = 0.060
 VOL_LOOKBACK = 60
