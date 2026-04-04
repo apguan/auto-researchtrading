@@ -1,9 +1,9 @@
 """
-Exp293: VOL_LOOKBACK=40 at new baseline.
+Exp295: VOL_LOOKBACK=41 at new baseline.
 
-Changes from exp292 (score 16.071):
-1. VOL_LOOKBACK=40 (was 42) — even shorter volume lookback.
-   Sweep around new optimum: 40, 42, 44.
+Changes from exp293 (score 16.076):
+1. VOL_LOOKBACK=41 (was 40) — fine-tune.
+   Curve: 38=16.045, 40=16.076, 42=16.071. Peak near 40.
 """
 
 import numpy as np
@@ -34,7 +34,7 @@ BB_PERIOD = 6
 OBV_MA_PERIOD = 26
 
 BASE_POSITION_PCT = 0.060
-VOL_LOOKBACK = 40
+VOL_LOOKBACK = 41
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
