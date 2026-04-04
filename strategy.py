@@ -1,8 +1,9 @@
 """
-Exp153: Smaller position size to reduce turnover penalty.
+Exp155: Wider RSI neutral zone for more selective signals.
 
-Changes from exp152 (score 15.420):
-1. BASE_POSITION_PCT=0.075 (was 0.088) — smaller per-symbol position
+Changes from exp153 (score 15.4207):
+1. RSI_BULL=42 (was 44) — require stronger RSI for bull vote
+2. RSI_BEAR=58 (was 56) — require stronger RSI for bear vote
 """
 
 import numpy as np
@@ -20,8 +21,8 @@ LONG_WINDOW = 48
 EMA_FAST = 7
 EMA_SLOW = 30
 RSI_PERIOD = 7
-RSI_BULL = 44
-RSI_BEAR = 56
+RSI_BULL = 42
+RSI_BEAR = 58
 RSI_OVERBOUGHT = 75
 RSI_OVERSOLD = 25
 
