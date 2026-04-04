@@ -1,10 +1,9 @@
 """
-Exp254: RSI_OVERBOUGHT=74 RSI_OVERSOLD=26 — tighter exit thresholds.
+Exp266: EMA_FAST=6 — slightly slower EMA fast line.
 
-Changes from exp241 (score 15.788):
-1. RSI_OVERBOUGHT=74 (was 75) — exit longs at slightly lower RSI.
-2. RSI_OVERSOLD=26 (was 25) — exit shorts at slightly higher RSI.
-   Earlier exits. Previous: 76/24 lost -0.04 at old baseline.
+Changes from exp254 (score 15.843):
+1. EMA_FAST=6 (was 5) — narrower EMA spread.
+   EMA_FAST curve at old base: 3=15.568, 4=15.618, 5=optimal, 6=?
 """
 
 import numpy as np
@@ -19,7 +18,7 @@ SHORT_WINDOW = 6
 MED_WINDOW = 11
 MED2_WINDOW = 24
 LONG_WINDOW = 48
-EMA_FAST = 5
+EMA_FAST = 6
 EMA_SLOW = 27
 RSI_PERIOD = 7
 RSI_BULL = 42
