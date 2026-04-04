@@ -1,9 +1,10 @@
 """
-Exp241: VOL_LOOKBACK=44 — slightly shorter vol lookback.
+Exp254: RSI_OVERBOUGHT=74 RSI_OVERSOLD=26 — tighter exit thresholds.
 
-Changes from exp240 (score 15.769):
-1. VOL_LOOKBACK=44 (was 40) — test between 40 and 48.
-   VOL curve: 36=15.731, 40=15.769, 44=?, 48=15.762, 60=15.638.
+Changes from exp241 (score 15.788):
+1. RSI_OVERBOUGHT=74 (was 75) — exit longs at slightly lower RSI.
+2. RSI_OVERSOLD=26 (was 25) — exit shorts at slightly higher RSI.
+   Earlier exits. Previous: 76/24 lost -0.04 at old baseline.
 """
 
 import numpy as np
@@ -23,8 +24,8 @@ EMA_SLOW = 27
 RSI_PERIOD = 7
 RSI_BULL = 42
 RSI_BEAR = 58
-RSI_OVERBOUGHT = 75
-RSI_OVERSOLD = 25
+RSI_OVERBOUGHT = 74
+RSI_OVERSOLD = 26
 
 MACD_FAST = 11
 MACD_SLOW = 21
