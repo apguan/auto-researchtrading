@@ -1,9 +1,9 @@
 """
-Exp157: Slight MACD parameter shift.
+Exp158: Faster EMA crossover with narrower spread.
 
-Changes from exp155 (score 15.4356):
-1. MACD_FAST=11 (was 10) — slightly slower MACD fast line
-2. MACD_SLOW=21 (was 20) — slightly slower MACD slow line
+Changes from exp157 (score 15.4976):
+1. EMA_FAST=6 (was 7) — faster EMA response
+2. EMA_SLOW=28 (was 30) — slightly faster slow EMA
 """
 
 import numpy as np
@@ -18,8 +18,8 @@ SHORT_WINDOW = 6
 MED_WINDOW = 12
 MED2_WINDOW = 24
 LONG_WINDOW = 48
-EMA_FAST = 7
-EMA_SLOW = 30
+EMA_FAST = 6
+EMA_SLOW = 28
 RSI_PERIOD = 7
 RSI_BULL = 42
 RSI_BEAR = 58
