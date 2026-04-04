@@ -1,10 +1,10 @@
 """
-Exp275: RSI_BULL=41 RSI_BEAR=59 — slightly wider RSI entry zone at new baseline.
+Exp278: RSI_BULL=40 RSI_BEAR=60 — even wider RSI entry zone.
 
-Changes from exp269 (score 15.932):
-1. RSI_BULL=41 (was 42) — easier long entry.
-2. RSI_BEAR=59 (was 58) — easier short entry.
-   At old base 41/59 lost -0.007. Retest at 15.932.
+Changes from exp275 (score 15.951):
+1. RSI_BULL=40 (was 41) — even easier long entry.
+2. RSI_BEAR=60 (was 59) — even easier short entry.
+   RSI zone curve at new base: 42/58=15.932, 41/59=15.951, 40/60=?
 """
 
 import numpy as np
@@ -22,8 +22,8 @@ LONG_WINDOW = 48
 EMA_FAST = 3
 EMA_SLOW = 27
 RSI_PERIOD = 7
-RSI_BULL = 41
-RSI_BEAR = 59
+RSI_BULL = 40
+RSI_BEAR = 60
 RSI_OVERBOUGHT = 74
 RSI_OVERSOLD = 26
 
