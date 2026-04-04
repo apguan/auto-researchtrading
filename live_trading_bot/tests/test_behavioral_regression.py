@@ -334,12 +334,12 @@ class TestPerSymbolCloseInfo:
         assert engine.consume_close_info("ETH") == (0.0, 0)
 
 
-class TestMomentumVetoClearsPendingReversal:
-    """Bug: momentum veto on pending reversal didn't clear _pending_reversal,
-    causing the engine to retry every tick and spam logs."""
+class TestPendingReversalSurvivesMomentumVeto:
+    """Pending reversals now survive momentum veto (improvement #1).
+    Within grace period, momentum veto is skipped entirely (improvement #3)."""
 
     @pytest.mark.asyncio
-    async def test_vetoed_reversal_is_cleared(self, settings, signal_state, mock_client):
+    async def test_reversal_succeeds_within_grace_period(self, settings, signal_state, mock_client):
         engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
         engine.set_equity(100000.0)
 
@@ -364,11 +364,8 @@ class TestMomentumVetoClearsPendingReversal:
         mock_client.place_order.reset_mock()
 
         reentry = await engine.on_tick("BTC", 49000.0)
-        assert reentry is None, "Momentum veto should block re-entry"
-
-        assert "BTC" not in engine._pending_reversal, (
-            "Pending reversal must be cleared when momentum veto blocks re-entry"
-        )
+        assert reentry is not None, "Re-entry should succeed within grace period"
+        assert engine._pending_reversal.get("BTC") is None, "Pending reversal cleared on fill"
 
 
 class TestSyncPositionsSkipsClosingSymbols:

@@ -241,7 +241,7 @@ class ExecutionEngine:
 
         if current_size == 0:
             # Check for pending reversal first (Option A: re-enter after close)
-            pending_dir = self._pending_reversal.pop(symbol, None)
+            pending_dir = self._pending_reversal.get(symbol, None)
             if pending_dir is not None:
                 effective_direction = pending_dir
             else:
@@ -280,11 +280,11 @@ class ExecutionEngine:
                         return None
 
                 # Direction-aware momentum sizing
-                target_usd = self._calculate_position_size(symbol, effective_direction)
+                target_usd = self._calculate_position_size(symbol, effective_direction, is_pending_reversal=(pending_dir is not None))
                 if target_usd <= 0:
                     if pending_dir is not None:
                         logger.warning(
-                            "Pending reversal vetoed by momentum — clearing",
+                            "Pending reversal vetoed by momentum — will retry next tick",
                             extra={"symbol": symbol, "direction": effective_direction},
                         )
                     else:
@@ -352,6 +352,9 @@ class ExecutionEngine:
                     self._entry_prices[symbol] = order.avg_fill_price or price
                     self._last_executed_direction[symbol] = effective_direction
                     self.signal_state.entry_bar[symbol] = self.signal_state.bar_count
+                    self._pending_reversal.pop(symbol, None)
+                elif pending_dir is not None:
+                    self._pending_reversal.pop(symbol, None)
 
                 self._last_execution_attempt[symbol] = now_ms
                 return order
@@ -363,7 +366,7 @@ class ExecutionEngine:
     # Position sizing
     # ------------------------------------------------------------------
 
-    def _calculate_position_size(self, symbol: str, direction: int) -> float:
+    def _calculate_position_size(self, symbol: str, direction: int, is_pending_reversal: bool = False) -> float:
         """Direction-aware momentum sizing.
 
         Longs sized by positive momentum, shorts sized by negative momentum.
@@ -373,19 +376,26 @@ class ExecutionEngine:
         """
         momentum = self.signal_state.momentum.get(symbol, 0.0)
 
-        # Only size if direction matches momentum sign
-        if direction > 0 and momentum <= 0:
-            logger.debug(
-                "momentum veto: long signal but non-positive momentum",
-                extra={"symbol": symbol, "momentum": momentum, "direction": direction},
-            )
-            return 0.0  # Bullish signal but negative/zero momentum — skip
-        if direction < 0 and momentum >= 0:
-            logger.debug(
-                "momentum veto: short signal but non-negative momentum",
-                extra={"symbol": symbol, "momentum": momentum, "direction": direction},
-            )
-            return 0.0  # Bearish signal but positive/zero momentum — skip
+        in_grace = False
+        if is_pending_reversal:
+            exit_bar = self.signal_state.last_exit_bar.get(symbol, -999)
+            bars_since_exit = self.signal_state.bar_count - exit_bar
+            if bars_since_exit <= self.settings.REENTRY_GRACE_BARS:
+                in_grace = True
+
+        if not in_grace:
+            if direction > 0 and momentum < -self.settings.MOMENTUM_VETO_THRESHOLD:
+                logger.debug(
+                    "momentum veto: long signal but strongly negative momentum",
+                    extra={"symbol": symbol, "momentum": momentum, "direction": direction},
+                )
+                return 0.0
+            if direction < 0 and momentum > self.settings.MOMENTUM_VETO_THRESHOLD:
+                logger.debug(
+                    "momentum veto: short signal but strongly positive momentum",
+                    extra={"symbol": symbol, "momentum": momentum, "direction": direction},
+                )
+                return 0.0
 
         equity = self._equity
         if equity <= 0:
