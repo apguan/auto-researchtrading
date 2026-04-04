@@ -1,9 +1,8 @@
 """
-Exp160: Even faster EMA crossover.
+Exp161: Continue shrinking position size.
 
-Changes from exp159 (score 15.5001):
-1. EMA_FAST=5 (was 6) — faster EMA response
-2. EMA_SLOW=27 (was 28) — slightly faster slow EMA
+Changes from exp160 (score 15.5266):
+1. BASE_POSITION_PCT=0.065 (was 0.070) — smaller positions
 """
 
 import numpy as np
@@ -33,7 +32,7 @@ MACD_SIGNAL = 9
 BB_PERIOD = 6
 OBV_MA_PERIOD = 20
 
-BASE_POSITION_PCT = 0.070
+BASE_POSITION_PCT = 0.065
 VOL_LOOKBACK = 60
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
