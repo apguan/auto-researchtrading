@@ -1,9 +1,9 @@
 """
-Exp237: VOL_LOOKBACK=48 — shorter volatility lookback window.
+Exp240: VOL_LOOKBACK=40 — shorter volatility lookback.
 
-Changes from exp233 (score 15.695):
-1. VOL_LOOKBACK=48 (was 60) — faster volatility estimation for dynamic threshold.
-   More responsive to recent vol regime changes.
+Changes from exp237 (score 15.762):
+1. VOL_LOOKBACK=40 (was 48) — between 36 (15.731) and 48 (15.762).
+   VOL curve: 36=15.731, 40=?, 48=15.762, 60=15.638.
 """
 
 import numpy as np
@@ -34,7 +34,7 @@ BB_PERIOD = 6
 OBV_MA_PERIOD = 25
 
 BASE_POSITION_PCT = 0.060
-VOL_LOOKBACK = 48
+VOL_LOOKBACK = 40
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
