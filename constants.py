@@ -21,11 +21,11 @@ ALL_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
 INTERVAL_SYMBOLS: dict[str, list[str]] = {
     "1h": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
     "15m": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
-    "5m": ["BTC", "ETH", "SOL", "XRP","HYPE"],
-    "1m": ["BTC", "ETH", "SOL", "XRP","HYPE"],
+    "5m": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
+    "1m": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
 }
 
-BENCHMARK_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
+BENCHMARK_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE", "ALGO", "LIT", "MON", "NEAR", "TAO", "XPL", "ZEC"]
 
 def make_equal_weights(
     symbols: list[str] | None = None,
@@ -105,6 +105,7 @@ PARAM_COLUMNS: list[str] = [
     "BASE_THRESHOLD",
     "COOLDOWN_BARS",
     "MIN_VOTES",
+    "OBV_MA_PERIOD",
 ]
 
 INT_PARAMS: set[str] = {
@@ -113,6 +114,7 @@ INT_PARAMS: set[str] = {
     "MACD_FAST", "MACD_SLOW",
     "MACD_SIGNAL", "BB_PERIOD",
     "VOL_LOOKBACK", "ATR_LOOKBACK", "COOLDOWN_BARS", "MIN_VOTES",
+    "OBV_MA_PERIOD",
 }
 
 
@@ -159,6 +161,7 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         # Execution-layer config (NOT in PARAM_COLUMNS — not strategy tuning)
         "MOMENTUM_VETO_THRESHOLD": 0.005,
         "REENTRY_GRACE_BARS": 3,
+        "OBV_MA_PERIOD": 20,
         **UNIFORM_DEFAULTS,
     },
 }
