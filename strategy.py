@@ -1,8 +1,8 @@
 """
-Exp124: RSI_PERIOD=7 with current best params.
+Exp128: Even wider RSI neutral — RSI_BULL=46, RSI_BEAR=54.
 
-Changes from exp114 (score 15.062):
-1. RSI_PERIOD=7 (was 8) — slightly faster RSI, previously showed gains
+Changes from exp124 (score 15.100):
+1. RSI_BULL=46 (was 47), RSI_BEAR=54 (was 53) — wider RSI neutral zone
 """
 
 import numpy as np
@@ -20,8 +20,8 @@ LONG_WINDOW = 36
 EMA_FAST = 7
 EMA_SLOW = 26
 RSI_PERIOD = 7
-RSI_BULL = 47
-RSI_BEAR = 53
+RSI_BULL = 46
+RSI_BEAR = 54
 RSI_OVERBOUGHT = 75
 RSI_OVERSOLD = 25
 
