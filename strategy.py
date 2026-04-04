@@ -1,10 +1,9 @@
 """
-Exp103: Add OBV volume confirmation as 7th signal.
+Exp104: Stricter consensus — MIN_VOTES=5 with 7 signals.
 
-Changes from exp102 (score 20.634):
-1. Add OBV trend signal: bullish when OBV > OBV MA(20), bearish when below
-2. Ensemble now 7 signals with MIN_VOTES=4 (57% majority vs old 67%)
-3. Generates ~43% more signals while maintaining consensus quality gate
+Changes from exp103 (score 13.958):
+1. MIN_VOTES=5 (71% majority) — fewer but higher quality signals
+2. All other parameters unchanged from exp103
 """
 
 import numpy as np
@@ -43,7 +42,7 @@ TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 4  # out of 7
+MIN_VOTES = 5  # out of 7
 
 
 class Strategy:
