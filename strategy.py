@@ -1,8 +1,8 @@
 """
-Exp134: Continue widening RSI neutral — RSI_BULL=45, RSI_BEAR=55.
+Exp136: Even longer vol window — VOL_LOOKBACK=60.
 
-Changes from exp128 (score 15.172):
-1. RSI_BULL=45 (was 46), RSI_BEAR=55 (was 54) — even wider RSI neutral zone
+Changes from exp134 (score 15.246):
+1. VOL_LOOKBACK=60 (was 48) — more stable vol estimate
 """
 
 import numpy as np
@@ -33,7 +33,7 @@ BB_PERIOD = 6
 OBV_MA_PERIOD = 20
 
 BASE_POSITION_PCT = 0.088
-VOL_LOOKBACK = 48
+VOL_LOOKBACK = 60
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
