@@ -1,8 +1,8 @@
 """
-Exp114: Longer vol lookback — VOL_LOOKBACK=48.
+Exp124: RSI_PERIOD=7 with current best params.
 
-Changes from exp113 (score 15.039):
-1. VOL_LOOKBACK=48 (was 36) — more stable vol estimate, less threshold jitter
+Changes from exp114 (score 15.062):
+1. RSI_PERIOD=7 (was 8) — slightly faster RSI, previously showed gains
 """
 
 import numpy as np
@@ -19,7 +19,7 @@ MED2_WINDOW = 24
 LONG_WINDOW = 36
 EMA_FAST = 7
 EMA_SLOW = 26
-RSI_PERIOD = 8
+RSI_PERIOD = 7
 RSI_BULL = 47
 RSI_BEAR = 53
 RSI_OVERBOUGHT = 75
