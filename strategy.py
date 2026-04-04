@@ -1,10 +1,9 @@
 """
-Exp278: RSI_BULL=40 RSI_BEAR=60 — even wider RSI entry zone.
+Exp281: OBV_MA_PERIOD=26 at new baseline.
 
-Changes from exp275 (score 15.951):
-1. RSI_BULL=40 (was 41) — even easier long entry.
-2. RSI_BEAR=60 (was 59) — even easier short entry.
-   RSI zone curve at new base: 42/58=15.932, 41/59=15.951, 40/60=?
+Changes from exp278 (score 15.960):
+1. OBV_MA_PERIOD=26 (was 25) — longer volume trend.
+   At old base: 26=15.784. Retest at 15.960.
 """
 
 import numpy as np
@@ -32,7 +31,7 @@ MACD_SLOW = 21
 MACD_SIGNAL = 9
 
 BB_PERIOD = 6
-OBV_MA_PERIOD = 25
+OBV_MA_PERIOD = 26
 
 BASE_POSITION_PCT = 0.060
 VOL_LOOKBACK = 44
