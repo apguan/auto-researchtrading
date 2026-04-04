@@ -1,8 +1,8 @@
 """
-Exp145: Continue RSI widening — RSI_BULL=44, RSI_BEAR=56.
+Exp146: Continue EMA slow trend — EMA_SLOW=30.
 
-Changes from exp139 (score 15.338):
-1. RSI_BULL=44 (was 45), RSI_BEAR=56 (was 55) — wider RSI neutral zone
+Changes from exp145 (score 15.356):
+1. EMA_SLOW=30 (was 28) — slower trend filter
 """
 
 import numpy as np
@@ -18,7 +18,7 @@ MED_WINDOW = 12
 MED2_WINDOW = 24
 LONG_WINDOW = 36
 EMA_FAST = 7
-EMA_SLOW = 28
+EMA_SLOW = 30
 RSI_PERIOD = 7
 RSI_BULL = 44
 RSI_BEAR = 56
