@@ -1,8 +1,8 @@
 """
-Exp146: Continue EMA slow trend — EMA_SLOW=30.
+Exp152: Longer lookback — LONG_WINDOW=48.
 
-Changes from exp145 (score 15.356):
-1. EMA_SLOW=30 (was 28) — slower trend filter
+Changes from exp146 (score 15.402):
+1. LONG_WINDOW=48 (was 36) — more history for data sufficiency
 """
 
 import numpy as np
@@ -16,7 +16,7 @@ SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
 SHORT_WINDOW = 6
 MED_WINDOW = 12
 MED2_WINDOW = 24
-LONG_WINDOW = 36
+LONG_WINDOW = 48
 EMA_FAST = 7
 EMA_SLOW = 30
 RSI_PERIOD = 7
