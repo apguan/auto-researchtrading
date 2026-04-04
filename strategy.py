@@ -1,9 +1,9 @@
 """
-Exp240: VOL_LOOKBACK=40 — shorter volatility lookback.
+Exp241: VOL_LOOKBACK=44 — slightly shorter vol lookback.
 
-Changes from exp237 (score 15.762):
-1. VOL_LOOKBACK=40 (was 48) — between 36 (15.731) and 48 (15.762).
-   VOL curve: 36=15.731, 40=?, 48=15.762, 60=15.638.
+Changes from exp240 (score 15.769):
+1. VOL_LOOKBACK=44 (was 40) — test between 40 and 48.
+   VOL curve: 36=15.731, 40=15.769, 44=?, 48=15.762, 60=15.638.
 """
 
 import numpy as np
@@ -34,7 +34,7 @@ BB_PERIOD = 6
 OBV_MA_PERIOD = 25
 
 BASE_POSITION_PCT = 0.060
-VOL_LOOKBACK = 40
+VOL_LOOKBACK = 44
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
