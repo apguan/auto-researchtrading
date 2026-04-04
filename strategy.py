@@ -1,9 +1,9 @@
 """
-Exp233: MED_WINDOW=11 — faster momentum lookback.
+Exp237: VOL_LOOKBACK=48 — shorter volatility lookback window.
 
-Changes from exp163 (score 15.638):
-1. MED_WINDOW=11 (was 12) — 11h return for momentum signal instead of 12h.
-   Slightly faster momentum detection.
+Changes from exp233 (score 15.695):
+1. VOL_LOOKBACK=48 (was 60) — faster volatility estimation for dynamic threshold.
+   More responsive to recent vol regime changes.
 """
 
 import numpy as np
@@ -34,7 +34,7 @@ BB_PERIOD = 6
 OBV_MA_PERIOD = 25
 
 BASE_POSITION_PCT = 0.060
-VOL_LOOKBACK = 60
+VOL_LOOKBACK = 48
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
