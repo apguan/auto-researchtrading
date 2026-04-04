@@ -1,9 +1,9 @@
 """
-Exp155: Wider RSI neutral zone for more selective signals.
+Exp157: Slight MACD parameter shift.
 
-Changes from exp153 (score 15.4207):
-1. RSI_BULL=42 (was 44) — require stronger RSI for bull vote
-2. RSI_BEAR=58 (was 56) — require stronger RSI for bear vote
+Changes from exp155 (score 15.4356):
+1. MACD_FAST=11 (was 10) — slightly slower MACD fast line
+2. MACD_SLOW=21 (was 20) — slightly slower MACD slow line
 """
 
 import numpy as np
@@ -26,8 +26,8 @@ RSI_BEAR = 58
 RSI_OVERBOUGHT = 75
 RSI_OVERSOLD = 25
 
-MACD_FAST = 10
-MACD_SLOW = 20
+MACD_FAST = 11
+MACD_SLOW = 21
 MACD_SIGNAL = 9
 
 BB_PERIOD = 6
