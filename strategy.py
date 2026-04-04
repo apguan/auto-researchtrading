@@ -1,8 +1,8 @@
 """
-Exp128: Even wider RSI neutral — RSI_BULL=46, RSI_BEAR=54.
+Exp134: Continue widening RSI neutral — RSI_BULL=45, RSI_BEAR=55.
 
-Changes from exp124 (score 15.100):
-1. RSI_BULL=46 (was 47), RSI_BEAR=54 (was 53) — wider RSI neutral zone
+Changes from exp128 (score 15.172):
+1. RSI_BULL=45 (was 46), RSI_BEAR=55 (was 54) — even wider RSI neutral zone
 """
 
 import numpy as np
@@ -20,8 +20,8 @@ LONG_WINDOW = 36
 EMA_FAST = 7
 EMA_SLOW = 26
 RSI_PERIOD = 7
-RSI_BULL = 46
-RSI_BEAR = 54
+RSI_BULL = 45
+RSI_BEAR = 55
 RSI_OVERBOUGHT = 75
 RSI_OVERSOLD = 25
 
