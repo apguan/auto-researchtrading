@@ -1,9 +1,9 @@
 """
-Exp266: EMA_FAST=6 — slightly slower EMA fast line.
+Exp268: EMA_FAST=4 — faster EMA crossover at new baseline.
 
-Changes from exp254 (score 15.843):
-1. EMA_FAST=6 (was 5) — narrower EMA spread.
-   EMA_FAST curve at old base: 3=15.568, 4=15.618, 5=optimal, 6=?
+Changes from exp266 (score 15.844):
+1. EMA_FAST=4 (was 6) — much faster EMA crossover.
+   At old base: 4=15.618. Retest at 15.844 baseline.
 """
 
 import numpy as np
@@ -18,7 +18,7 @@ SHORT_WINDOW = 6
 MED_WINDOW = 11
 MED2_WINDOW = 24
 LONG_WINDOW = 48
-EMA_FAST = 6
+EMA_FAST = 4
 EMA_SLOW = 27
 RSI_PERIOD = 7
 RSI_BULL = 42
