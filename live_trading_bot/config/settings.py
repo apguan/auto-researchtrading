@@ -11,8 +11,21 @@ if str(_REPO_ROOT) not in sys.path:
 from constants import ALL_SYMBOLS, INTERVAL_SYMBOLS, make_equal_weights, LOOKBACK_BARS
 from constants import STRATEGY_DEFAULTS as _STRATEGY_DEFAULTS
 from constants import PARAM_COLUMNS, INT_PARAMS as _INT_PARAMS
+from constants import HYPERLIQUID_API_URL
 
 _HOUR_DEFAULTS = _STRATEGY_DEFAULTS["1h"]
+
+
+def _discover_usdc_cross_margin_perps() -> list[str]:
+    try:
+        import asyncio
+        from hyperliquid.info import Info
+        from live_trading_bot.exchange.hyperliquid import fetch_usdc_cross_margin_perps
+
+        info = Info(base_url=HYPERLIQUID_API_URL, skip_ws=True)
+        return asyncio.run(fetch_usdc_cross_margin_perps(info))
+    except Exception:
+        return list(ALL_SYMBOLS)
 
 
 def _load_active_db_params() -> dict[str, int | float]:
@@ -107,6 +120,7 @@ class Settings:
 
     MOMENTUM_VETO_THRESHOLD: float = float(_HOUR_DEFAULTS["MOMENTUM_VETO_THRESHOLD"])
     REENTRY_GRACE_BARS: int = int(_HOUR_DEFAULTS["REENTRY_GRACE_BARS"])
+    OBV_MA_PERIOD: int = int(_HOUR_DEFAULTS["OBV_MA_PERIOD"])
 
     HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
     HYPERLIQUID_WS_URL: str = "wss://api.hyperliquid.xyz/ws"
@@ -157,9 +171,7 @@ class Settings:
         if val := os.getenv("TRADING_PAIRS"):
             settings.TRADING_PAIRS = val.split(",")
         else:
-            settings.TRADING_PAIRS = list(
-                INTERVAL_SYMBOLS.get(settings.BAR_INTERVAL, ALL_SYMBOLS)
-            )
+            settings.TRADING_PAIRS = _discover_usdc_cross_margin_perps()
         settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
 
         if val := os.getenv("MAX_LEVERAGE"):
@@ -241,6 +253,9 @@ class Settings:
 
         if val := os.getenv("REENTRY_GRACE_BARS"):
             settings.REENTRY_GRACE_BARS = int(val)
+
+        if val := os.getenv("OBV_MA_PERIOD"):
+            settings.OBV_MA_PERIOD = int(val)
 
         _apply_db_params(settings)
 

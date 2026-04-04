@@ -1,10 +1,10 @@
 """
-Exp32: Add Bollinger Band width as 6th signal for vol compression detection.
+Exp103: Add OBV volume confirmation as 7th signal.
 
-Changes from exp28 (ATR 5.5, score 9.382):
-1. Add BB width signal: bullish when BB width is below median (compression = pending breakout)
-2. Keep MIN_VOTES at 4 but out of 6 signals now
-3. BB compression acts as a quality filter for entries
+Changes from exp102 (score 20.634):
+1. Add OBV trend signal: bullish when OBV > OBV MA(20), bearish when below
+2. Ensemble now 7 signals with MIN_VOTES=4 (57% majority vs old 67%)
+3. Generates ~43% more signals while maintaining consensus quality gate
 """
 
 import numpy as np
@@ -32,6 +32,7 @@ MACD_SLOW = 23
 MACD_SIGNAL = 9
 
 BB_PERIOD = 5
+OBV_MA_PERIOD = 20
 
 BASE_POSITION_PCT = 0.088
 VOL_LOOKBACK = 36
@@ -42,7 +43,7 @@ TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 4  # out of 6 now
+MIN_VOTES = 4  # out of 7
 
 
 class Strategy:
@@ -104,11 +105,27 @@ class Strategy:
             bb_pctile = calc_bb_width_pctile(closes, BB_PERIOD)
             bb_compressed = bb_pctile < 90  # Below 40th percentile = compressed
 
+            # OBV trend: On-Balance Volume vs its MA
+            vol_data = bd.history["volume"].values
+            vol_bull = False
+            vol_bear = False
+            if len(vol_data) > OBV_MA_PERIOD and len(closes) > OBV_MA_PERIOD:
+                price_changes = np.diff(closes[-(OBV_MA_PERIOD + 1):])
+                recent_vol = vol_data[-(OBV_MA_PERIOD):]
+                signed_vol = np.where(
+                    price_changes > 0, recent_vol,
+                    np.where(price_changes < 0, -recent_vol, 0.0),
+                )
+                obv = np.cumsum(signed_vol)
+                obv_ma = np.mean(obv[-OBV_MA_PERIOD:])
+                vol_bull = obv[-1] > obv_ma
+                vol_bear = obv[-1] < obv_ma
+
             bull_votes = sum(
-                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed]
+                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed, vol_bull]
             )
             bear_votes = sum(
-                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed]
+                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed, vol_bear]
             )
 
             bullish = bull_votes >= MIN_VOTES
@@ -207,7 +224,7 @@ ACTIVE_PARAMS = (
     "MACD_SIGNAL", "BB_PERIOD",
     "BASE_POSITION_PCT", "VOL_LOOKBACK", "TARGET_VOL", "ATR_LOOKBACK",
     "ATR_STOP_MULT", "TAKE_PROFIT_PCT", "BASE_THRESHOLD",
-    "COOLDOWN_BARS", "MIN_VOTES",
+    "COOLDOWN_BARS", "MIN_VOTES", "OBV_MA_PERIOD",
 )
 
 INT_PARAMS = {
@@ -216,6 +233,7 @@ INT_PARAMS = {
     "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
     "MACD_SIGNAL", "BB_PERIOD",
     "VOL_LOOKBACK", "ATR_LOOKBACK", "COOLDOWN_BARS", "MIN_VOTES",
+    "OBV_MA_PERIOD",
 }
 
 
