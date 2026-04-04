@@ -1,9 +1,9 @@
 """
-Exp104: Stricter consensus — MIN_VOTES=5 with 7 signals.
+Exp111: Faster MACD — MACD_FAST=10, MACD_SLOW=20.
 
-Changes from exp103 (score 13.958):
-1. MIN_VOTES=5 (71% majority) — fewer but higher quality signals
-2. All other parameters unchanged from exp103
+Changes from exp104 (score 14.809):
+1. MACD_FAST=10 (was 14), MACD_SLOW=20 (was 23) — quicker MACD crossovers
+2. MIN_VOTES=5 retained from exp104
 """
 
 import numpy as np
@@ -26,8 +26,8 @@ RSI_BEAR = 52
 RSI_OVERBOUGHT = 75
 RSI_OVERSOLD = 25
 
-MACD_FAST = 14
-MACD_SLOW = 23
+MACD_FAST = 10
+MACD_SLOW = 20
 MACD_SIGNAL = 9
 
 BB_PERIOD = 5
