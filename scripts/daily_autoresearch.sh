@@ -58,9 +58,8 @@ else
     git checkout -b "$BRANCH" "$HARNESS_BRANCH" >> "$LOG_FILE" 2>&1
 fi
 
-if [ ! -f results.tsv ]; then
-    echo -e "commit\tscore\tsharpe\tmax_dd\tstatus\tdescription" > results.tsv
-fi
+# Always start with fresh results.tsv — never accumulate across runs
+echo -e "commit\tscore\tsharpe\tmax_dd\tstatus\tdescription" > results.tsv
 
 # ── 3. Run autoresearch in batches ────────────────────────────
 for batch in $(seq 1 $NUM_BATCHES); do
@@ -108,7 +107,7 @@ log "Promoting best PASS experiment to active..."
 uv run python scripts/promote_best.py >> "$LOG_FILE" 2>&1 || log "WARNING: promote_best.py failed"
 
 # ── 5. Summary ─────────────────────────────────────────────────
-BEST=$(tail -n +2 results.tsv | sort -t$'\t' -k2 -rn | head -1)
+BEST=$(awk -F'\t' 'NR>1 && $5=="PASS"' results.tsv | sort -t$'\t' -k2 -rn | head -1)
 log "=== DAILY AUTORESEARCH COMPLETE ==="
 log "Best result: $BEST"
 log "Branch: $BRANCH"

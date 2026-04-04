@@ -11,7 +11,14 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from _env import load_env
+
+load_env()
 
 
 FIELDS = {
