@@ -1,8 +1,8 @@
 """
-Exp136: Even longer vol window — VOL_LOOKBACK=60.
+Exp139: Slower EMA — EMA_SLOW=28.
 
-Changes from exp134 (score 15.246):
-1. VOL_LOOKBACK=60 (was 48) — more stable vol estimate
+Changes from exp136 (score 15.323):
+1. EMA_SLOW=28 (was 26) — slightly slower trend filter
 """
 
 import numpy as np
@@ -18,7 +18,7 @@ MED_WINDOW = 12
 MED2_WINDOW = 24
 LONG_WINDOW = 36
 EMA_FAST = 7
-EMA_SLOW = 26
+EMA_SLOW = 28
 RSI_PERIOD = 7
 RSI_BULL = 45
 RSI_BEAR = 55
