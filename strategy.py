@@ -1,10 +1,9 @@
 """
-Exp103: Add OBV volume confirmation as 7th signal.
+Exp322: RSI_BULL=38 RSI_BEAR=62 wider at new baseline.
 
-Changes from exp102 (score 20.634):
-1. Add OBV trend signal: bullish when OBV > OBV MA(20), bearish when below
-2. Ensemble now 7 signals with MIN_VOTES=4 (57% majority vs old 67%)
-3. Generates ~43% more signals while maintaining consensus quality gate
+Changes from exp302 (score 16.145):
+1. RSI_BULL=38 (was 40), RSI_BEAR=62 (was 60) — much wider RSI entry zone.
+   39/61 scored 16.142. Test 38/62.
 """
 
 import numpy as np
@@ -16,34 +15,34 @@ ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]
 SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 6
-MED_WINDOW = 12
+MED_WINDOW = 11
 MED2_WINDOW = 24
-LONG_WINDOW = 36
-EMA_FAST = 7
-EMA_SLOW = 26
-RSI_PERIOD = 8
-RSI_BULL = 48
-RSI_BEAR = 52
-RSI_OVERBOUGHT = 75
-RSI_OVERSOLD = 25
+LONG_WINDOW = 48
+EMA_FAST = 3
+EMA_SLOW = 27
+RSI_PERIOD = 7
+RSI_BULL = 38
+RSI_BEAR = 62
+RSI_OVERBOUGHT = 74
+RSI_OVERSOLD = 26
 
-MACD_FAST = 14
-MACD_SLOW = 23
+MACD_FAST = 11
+MACD_SLOW = 21
 MACD_SIGNAL = 9
 
-BB_PERIOD = 5
-OBV_MA_PERIOD = 20
+BB_PERIOD = 6
+OBV_MA_PERIOD = 26
 
-BASE_POSITION_PCT = 0.088
-VOL_LOOKBACK = 36
-TARGET_VOL = 0.015
+BASE_POSITION_PCT = 0.060
+VOL_LOOKBACK = 41
+TARGET_VOL = 0.014
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
 TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 4  # out of 7
+MIN_VOTES = 5  # out of 7
 
 
 class Strategy:
