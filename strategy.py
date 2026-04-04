@@ -1,9 +1,10 @@
 """
-Exp111: Faster MACD — MACD_FAST=10, MACD_SLOW=20.
+Exp113: Wider RSI bands + wider BB — RSI_BULL=47, RSI_BEAR=53, BB_PERIOD=6.
 
-Changes from exp104 (score 14.809):
-1. MACD_FAST=10 (was 14), MACD_SLOW=20 (was 23) — quicker MACD crossovers
-2. MIN_VOTES=5 retained from exp104
+Changes from exp111 (score 14.840):
+1. RSI_BULL=47 (was 48), RSI_BEAR=53 (was 52) — wider neutral zone
+2. BB_PERIOD=6 (was 5) — wider Bollinger Band lookback
+3. MACD 10/20 and MIN_VOTES=5 retained
 """
 
 import numpy as np
@@ -21,8 +22,8 @@ LONG_WINDOW = 36
 EMA_FAST = 7
 EMA_SLOW = 26
 RSI_PERIOD = 8
-RSI_BULL = 48
-RSI_BEAR = 52
+RSI_BULL = 47
+RSI_BEAR = 53
 RSI_OVERBOUGHT = 75
 RSI_OVERSOLD = 25
 
@@ -30,7 +31,7 @@ MACD_FAST = 10
 MACD_SLOW = 20
 MACD_SIGNAL = 9
 
-BB_PERIOD = 5
+BB_PERIOD = 6
 OBV_MA_PERIOD = 20
 
 BASE_POSITION_PCT = 0.088
