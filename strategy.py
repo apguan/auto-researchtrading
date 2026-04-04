@@ -1,10 +1,8 @@
 """
-Exp113: Wider RSI bands + wider BB — RSI_BULL=47, RSI_BEAR=53, BB_PERIOD=6.
+Exp114: Longer vol lookback — VOL_LOOKBACK=48.
 
-Changes from exp111 (score 14.840):
-1. RSI_BULL=47 (was 48), RSI_BEAR=53 (was 52) — wider neutral zone
-2. BB_PERIOD=6 (was 5) — wider Bollinger Band lookback
-3. MACD 10/20 and MIN_VOTES=5 retained
+Changes from exp113 (score 15.039):
+1. VOL_LOOKBACK=48 (was 36) — more stable vol estimate, less threshold jitter
 """
 
 import numpy as np
@@ -35,7 +33,7 @@ BB_PERIOD = 6
 OBV_MA_PERIOD = 20
 
 BASE_POSITION_PCT = 0.088
-VOL_LOOKBACK = 36
+VOL_LOOKBACK = 48
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
