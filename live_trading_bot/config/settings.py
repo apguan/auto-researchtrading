@@ -105,6 +105,9 @@ class Settings:
     VOL_LOOKBACK: int = int(_HOUR_DEFAULTS["VOL_LOOKBACK"])
     BASE_THRESHOLD: float = float(_HOUR_DEFAULTS["BASE_THRESHOLD"])
 
+    MOMENTUM_VETO_THRESHOLD: float = float(_HOUR_DEFAULTS["MOMENTUM_VETO_THRESHOLD"])
+    REENTRY_GRACE_BARS: int = int(_HOUR_DEFAULTS["REENTRY_GRACE_BARS"])
+
     HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
     HYPERLIQUID_WS_URL: str = "wss://api.hyperliquid.xyz/ws"
     # Main wallet address for account state queries. Set this when using an API
@@ -232,6 +235,12 @@ class Settings:
 
         if val := os.getenv("ALERT_INSTANCE_NAME"):
             settings.ALERT_INSTANCE_NAME = val
+
+        if val := os.getenv("MOMENTUM_VETO_THRESHOLD"):
+            settings.MOMENTUM_VETO_THRESHOLD = float(val)
+
+        if val := os.getenv("REENTRY_GRACE_BARS"):
+            settings.REENTRY_GRACE_BARS = int(val)
 
         _apply_db_params(settings)
 

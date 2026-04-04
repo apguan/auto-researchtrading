@@ -156,6 +156,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "COOLDOWN_BARS": 0,
         "EXIT_CONVICTION_BARS": 2,
         "MIN_HOLD_BARS": 2,
+        # Execution-layer config (NOT in PARAM_COLUMNS — not strategy tuning)
+        "MOMENTUM_VETO_THRESHOLD": 0.005,
+        "REENTRY_GRACE_BARS": 3,
         **UNIFORM_DEFAULTS,
     },
 }
