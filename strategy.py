@@ -1,9 +1,9 @@
 """
-Exp268: EMA_FAST=4 — faster EMA crossover at new baseline.
+Exp269: EMA_FAST=3 — even faster EMA crossover at new baseline.
 
-Changes from exp266 (score 15.844):
-1. EMA_FAST=4 (was 6) — much faster EMA crossover.
-   At old base: 4=15.618. Retest at 15.844 baseline.
+Changes from exp268 (score 15.883):
+1. EMA_FAST=3 (was 4) — very fast EMA crossover.
+   EMA_FAST curve at old base: 3=15.568, 4=15.883(new). Continue sweeping.
 """
 
 import numpy as np
@@ -18,7 +18,7 @@ SHORT_WINDOW = 6
 MED_WINDOW = 11
 MED2_WINDOW = 24
 LONG_WINDOW = 48
-EMA_FAST = 4
+EMA_FAST = 3
 EMA_SLOW = 27
 RSI_PERIOD = 7
 RSI_BULL = 42
