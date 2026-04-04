@@ -1,9 +1,9 @@
 """
-Exp302: TARGET_VOL=0.014 resweep at new baseline.
+Exp322: RSI_BULL=38 RSI_BEAR=62 wider at new baseline.
 
-Changes from exp295 (score 16.107):
-1. TARGET_VOL=0.014 (was 0.015) — lower volume threshold.
-   At old base: 0.014 lost ~0.10. Retest at 16.107.
+Changes from exp302 (score 16.145):
+1. RSI_BULL=38 (was 40), RSI_BEAR=62 (was 60) — much wider RSI entry zone.
+   39/61 scored 16.142. Test 38/62.
 """
 
 import numpy as np
@@ -21,8 +21,8 @@ LONG_WINDOW = 48
 EMA_FAST = 3
 EMA_SLOW = 27
 RSI_PERIOD = 7
-RSI_BULL = 40
-RSI_BEAR = 60
+RSI_BULL = 38
+RSI_BEAR = 62
 RSI_OVERBOUGHT = 74
 RSI_OVERSOLD = 26
 
