@@ -1,8 +1,8 @@
 """
-Exp152: Longer lookback — LONG_WINDOW=48.
+Exp153: Smaller position size to reduce turnover penalty.
 
-Changes from exp146 (score 15.402):
-1. LONG_WINDOW=48 (was 36) — more history for data sufficiency
+Changes from exp152 (score 15.420):
+1. BASE_POSITION_PCT=0.075 (was 0.088) — smaller per-symbol position
 """
 
 import numpy as np
@@ -32,7 +32,7 @@ MACD_SIGNAL = 9
 BB_PERIOD = 6
 OBV_MA_PERIOD = 20
 
-BASE_POSITION_PCT = 0.088
+BASE_POSITION_PCT = 0.075
 VOL_LOOKBACK = 60
 TARGET_VOL = 0.015
 ATR_LOOKBACK = 24
