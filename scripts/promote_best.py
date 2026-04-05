@@ -31,7 +31,7 @@ def main():
                     hour=0, minute=0, second=0, microsecond=0
                 ).isoformat()
                 cur.execute(
-                    "SELECT id, score, description, run_date "
+                    "SELECT id, score, description, run_date, symbol "
                     "FROM param_snapshots "
                     "WHERE sweep_name = 'autoresearch' AND status = 'PASS' "
                     "AND period = '1h' AND run_date >= %s "
@@ -43,8 +43,8 @@ def main():
                     print("No PASS experiments found — nothing to promote", file=sys.stderr)
                     sys.exit(0)
 
-                best_id, best_score, best_desc, best_date = row
-                print(f"Best experiment: id={best_id} score={best_score:.4f} date={best_date} desc={best_desc}")
+                best_id, best_score, best_desc, best_date, best_symbol = row
+                print(f"Best experiment: id={best_id} score={best_score:.4f} date={best_date} symbols={best_symbol} desc={best_desc}")
 
                 cur.execute(
                     "UPDATE param_snapshots SET is_active = FALSE, is_best = FALSE "
