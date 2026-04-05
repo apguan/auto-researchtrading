@@ -8,11 +8,14 @@ Changes from exp302 (score 16.145):
 
 import numpy as np
 from strategy_utils import ema, calc_rsi, calc_atr, calc_vol, calc_macd, calc_bb_width_pctile
-from prepare import Signal
-from constants import INTERVAL_SYMBOLS, make_equal_weights
+from strategy_types import Signal
+from constants import INTERVAL_SYMBOLS
 
-ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]
-SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
+ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]  # fallback for _RUNTIME_SYMBOLS init; unused by on_bar
+
+# Populated on first on_bar() call with the symbols actually in bar_data.
+# Used by save_experiment_to_db() to persist the dynamic symbol set.
+_RUNTIME_SYMBOLS: list[str] = list(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 6
 MED_WINDOW = 11
@@ -52,16 +55,25 @@ class Strategy:
         self.atr_at_entry = {}
         self.exit_bar = {}
         self.bar_count = 0
+        self._symbols_initialized = False
 
     def on_bar(self, bar_data, portfolio):
+        global _RUNTIME_SYMBOLS
         signals = []
         equity = portfolio.equity if portfolio.equity > 0 else portfolio.cash
         self.bar_count += 1
 
-        for symbol in ACTIVE_SYMBOLS:
-            if symbol not in bar_data:
-                continue
-            bd = bar_data[symbol]
+        # Track the symbols present in this backtest
+        if not self._symbols_initialized:
+            _RUNTIME_SYMBOLS = sorted(bar_data.keys())
+            self._symbols_initialized = True
+        else:
+            # Accumulate any new symbols seen on later bars
+            new = [s for s in bar_data if s not in _RUNTIME_SYMBOLS]
+            if new:
+                _RUNTIME_SYMBOLS = sorted(_RUNTIME_SYMBOLS + new)
+
+        for symbol, bd in bar_data.items():
             if (
                 len(bd.history)
                 < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5, BB_PERIOD * 3)
@@ -135,7 +147,7 @@ class Strategy:
             ) < COOLDOWN_BARS
 
             vol_scale = 1.0
-            weight = SYMBOL_WEIGHTS.get(symbol, 0.33)
+            weight = 1.0 / max(len(bar_data), 1)
             strength_scale = 1.0
             size = (
                 equity
@@ -286,7 +298,7 @@ def save_experiment_to_db(
             datetime.now(timezone.utc).isoformat(),
             "autoresearch",
             "1h",
-            "ALL",
+            ",".join(_RUNTIME_SYMBOLS),
             False,
             sharpe,
             total_return_pct,
@@ -328,7 +340,7 @@ def load_params_from_db() -> bool:
             with conn.cursor() as cur:
                 select_cols = ", ".join(ACTIVE_PARAMS)
                 cur.execute(
-                    f"SELECT {select_cols} "
+                    f"SELECT symbol, {select_cols} "
                     "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
                     "ORDER BY run_date DESC LIMIT 1"
                 )
@@ -336,13 +348,19 @@ def load_params_from_db() -> bool:
                 if not row:
                     return False
 
-                for name, val in zip(ACTIVE_PARAMS, row):
+                symbol_str = row[0]
+                for name, val in zip(ACTIVE_PARAMS, row[1:]):
                     if name in INT_PARAMS:
                         globals()[name] = int(val)
                     else:
                         globals()[name] = float(val)
 
-                print(f"Loaded 1h params from DB")
+                if symbol_str and symbol_str != "ALL":
+                    loaded_symbols = [s.strip() for s in symbol_str.split(",") if s.strip()]
+                    if loaded_symbols:
+                        globals()["ACTIVE_SYMBOLS"] = loaded_symbols
+
+                print(f"Loaded 1h params from DB (symbols: {symbol_str})")
                 return True
     except Exception:
         return False
