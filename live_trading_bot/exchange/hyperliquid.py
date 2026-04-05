@@ -43,6 +43,36 @@ logger = get_logger(__name__)
 # ── Shared helpers ──────────────────────────────────────────────────
 
 
+async def fetch_usdc_cross_margin_perps(
+    info: Info, min_volume_24h: float = 10_000_000
+) -> list[str]:
+    """Fetch USDC-collateralized perps with cross margin and sufficient volume.
+
+    Filters:
+      - delisted (isDelisted=true)
+      - isolated-only (onlyIsolated=true or marginMode ∈ {strictIsolated, noCross})
+      - 24h notional volume < min_volume_24h (uses dayNtlVlm from metaAndAssetCtxs)
+
+    Returns sorted list of coin names, e.g. ["BTC", "ETH", "SOL", ...].
+    """
+    meta, asset_ctxs = await asyncio.to_thread(info.meta_and_asset_ctxs)
+    perps: list[str] = []
+    for asset, ctx in zip(meta.get("universe", []), asset_ctxs):
+        if asset.get("isDelisted", False):
+            continue
+        if asset.get("onlyIsolated"):
+            continue
+        margin_mode = asset.get("marginMode")
+        if margin_mode in ("strictIsolated", "noCross"):
+            continue
+        if min_volume_24h > 0:
+            vol = float(ctx.get("dayNtlVlm", 0))
+            if vol < min_volume_24h:
+                continue
+        perps.append(asset["name"])
+    return sorted(perps)
+
+
 async def fetch_candles_paginated(
     info: Info,
     symbol: str,
@@ -592,3 +622,8 @@ class HyperliquidClient:
                 )
 
         return candles
+
+    async def get_usdc_cross_margin_perps(
+        self, min_volume_24h: float = 10_000_000
+    ) -> list[str]:
+        return await fetch_usdc_cross_margin_perps(self._info, min_volume_24h)

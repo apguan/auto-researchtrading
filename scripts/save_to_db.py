@@ -11,7 +11,14 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from _env import load_env
+
+load_env()
 
 
 FIELDS = {
@@ -47,7 +54,6 @@ def main():
     log_path = sys.argv[1]
     description = sys.argv[2] if len(sys.argv) > 2 else ""
     status = sys.argv[3] if len(sys.argv) > 3 else "PASS"
-    is_best = status == "PASS"
 
     metrics = parse_run_log(log_path)
     print(f"Parsed: {metrics}", file=sys.stderr)
@@ -64,7 +70,6 @@ def main():
         profit_factor=metrics["profit_factor"],
         description=description,
         status=status,
-        is_best=is_best,
     )
 
     if ok:

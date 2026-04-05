@@ -16,10 +16,10 @@ uv sync
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in your values:
+Copy `.env.example` from repo root to `.env` and fill in your values:
 
 ```bash
-cp .env.example .env
+cp ../.env.example .env
 ```
 
 ### Required Variables
@@ -90,14 +90,14 @@ Dry run simulates trading against live market data without sending real orders. 
 
 ```bash
 cd live_trading_bot
-DRY_RUN=true python3 bot.py
+DRY_RUN=true uv run bot.py
 ```
 
 Or set `DRY_RUN=true` in `.env` and just run:
 
 ```bash
 cd live_trading_bot
-python3 bot.py
+uv run bot.py
 ```
 
 ### What Happens
@@ -143,7 +143,7 @@ Live trading places real orders on Hyperliquid with real capital. Make sure you 
 
 ```bash
 cd live_trading_bot
-DRY_RUN=false python3 bot.py
+DRY_RUN=false uv run bot.py
 ```
 
 Or set in `.env`:
@@ -195,16 +195,16 @@ Run historical backtests against saved candle data to evaluate strategy performa
 cd live_trading_bot
 
 # 15m strategy (recommended)
-python3 backtest/backtest_interval.py --interval 15m --strategy strategies.strategy_15m
+uv run backtest/backtest_interval.py --interval 15m --strategy strategies.strategy_15m
 
 # 5m strategy
-python3 backtest/backtest_interval.py --interval 5m --strategy strategies.strategy_5m
+uv run backtest/backtest_interval.py --interval 5m --strategy strategies.strategy_5m
 
 # 1m strategy
-python3 backtest/backtest_interval.py --interval 1m --strategy strategies.strategy_1m
+uv run backtest/backtest_interval.py --interval 1m --strategy strategies.strategy_1m
 
 # Download fresh data then backtest
-python3 backtest/backtest_interval.py --interval 15m --strategy strategies.strategy_15m --download --hours 1080
+uv run backtest/backtest_interval.py --interval 15m --strategy strategies.strategy_15m --download --hours 1080
 ```
 
 ### Parameter Tuning
@@ -265,10 +265,10 @@ Query realized + unrealized PnL directly from Hyperliquid. Captures all activity
 ```bash
 cd live_trading_bot
 
-python pnl.py              # Today (since midnight UTC)
-python pnl.py 1h           # Last hour
-python pnl.py 24h          # Last 24 hours
-python pnl.py 7d           # Last 7 days
+uv run pnl.py              # Today (since midnight UTC)
+uv run pnl.py 1h           # Last hour
+uv run pnl.py 24h          # Last 24 hours
+uv run pnl.py 7d           # Last 7 days
 ```
 
 Output includes per-symbol breakdown of realized PnL (closed trades), funding payments, and unrealized PnL on open positions.
@@ -293,4 +293,4 @@ The bot auto-reconnects on WebSocket disconnect with exponential backoff (1s →
 Only one bot instance should use `trading_bot.db` at a time. If you see "database is locked" errors, another process is using the file.
 
 ### Ctrl+C doesn't stop the bot
-This is a known issue with the websockets library blocking on read. Press Ctrl+C twice, or kill the process: `pkill -f "python3 bot.py"`.
+This is a known issue with the websockets library blocking on read. Press Ctrl+C twice, or kill the process: `pkill -f "uv run bot.py"`.

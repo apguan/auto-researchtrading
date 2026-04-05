@@ -3,7 +3,7 @@ from typing import Awaitable, Callable, Dict, List, Optional
 
 from ..execution.signal_state import SignalState
 from ..exchange.interface import Exchange
-from ..exchange.types import Order, OrderSide, OrderStatus, OrderType, AccountState
+from ..exchange.types import Order, OrderSide, OrderStatus, OrderType, AccountState, PositionSide
 from ..config.settings import Settings
 from ..monitoring.logger import get_logger
 
@@ -11,15 +11,20 @@ logger = get_logger(__name__)
 
 
 class ExecutionEngine:
-    """Unified tick-level execution engine.
+    """Unified tick-level execution engine — always on.
+
+    The execution engine runs on every tick and is the sole decision-maker
+    for entries and exits. It uses direction set by the hourly bar close
+    (stored in signal_state.target_positions) and direction-aware momentum
+    sizing for position sizes.
 
     Priority order (highest first):
-    1. Emergency exit — hard adverse move beyond EMERGENCY_EXIT_PCT
-    2. ATR trailing stop — from strategy's ATR_STOP_MULT
-    3. Signal flip to flat — close immediately
-    4. Signal reversal — close now, enter on next tick
-    5. Signal entry — with slippage guard
-    6. Hold — no action
+    1. Emergency exit — adverse move >= EMERGENCY_EXIT_PCT from entry
+    2. ATR trailing stop — price beyond ATR_STOP_MULT × ATR from peak/trough
+    3. Take profit — unrealized PnL >= TAKE_PROFIT_PCT from entry
+    4. Signal flip to flat — target_direction == 0 and we have a position
+    5. Signal reversal — close now, re-enter on next tick (Option A)
+    6. Entry — we're flat, direction set, not in cooldown, slippage OK
     """
 
     def __init__(
@@ -28,32 +33,70 @@ class ExecutionEngine:
         client: Exchange,
         settings: Settings,
         symbols: List[str],
+        risk_controller=None,  # Optional[RiskController]
+        position_limiter=None,  # Optional[PositionLimiter]
     ):
         self.signal_state = signal_state
         self.client = client
         self.settings = settings
         self.symbols = set(symbols)
+        self._risk_controller = risk_controller
+        self._position_limiter = position_limiter
 
         # Position tracking (coin quantities)
         self._position_sizes: Dict[str, float] = {}  # symbol -> coin qty
         self._entry_prices: Dict[str, float] = {}  # symbol -> fill price
         self._last_executed_direction: Dict[str, int] = {}  # symbol -> +1/-1/0
         self._last_execution_attempt: Dict[str, float] = {}  # symbol -> timestamp
+        self._current_prices: Dict[str, float] = {}  # symbol -> latest tick price
+
+        # Per-symbol close info for PnL calculation in bot (symbol -> (entry_price, direction))
+        self._pending_close_info: Dict[str, tuple[float, int]] = {}
+
+        # Symbols currently in the process of closing (prevent sync_positions re-hydrating)
+        self._closing: set = set()
+
+        # Equity for position sizing (set by bot on bar close via set_equity)
+        self._equity: float = 0.0
+
+        # Pending reversal: symbol -> direction to enter after closing.
+        # Implements Option A flip behavior (close now, re-enter on next tick).
+        self._pending_reversal: Dict[str, int] = {}
 
         # Callback for when a position is fully closed (for StopManager coordination)
         self.on_position_closed: Optional[Callable[[str], object]] = None
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def set_equity(self, equity: float) -> None:
+        """Called by bot on bar close with current equity for sizing."""
+        self._equity = equity
+
+    def clear_pending_reversal(self, symbol: str) -> None:
+        """Clear pending reversal for a symbol when new direction is set on bar close."""
+        self._pending_reversal.pop(symbol, None)
+
+    def consume_close_info(self, symbol: str) -> tuple[float, int]:
+        """Return and clear the last close info for a symbol. Returns (0, 0) if none."""
+        info = self._pending_close_info.pop(symbol, (0.0, 0))
+        return info
+
     async def on_tick(self, symbol: str, price: float) -> Optional[Order]:
-        """Process a tick. Returns the order placed, or None."""
+        """Process a tick. Returns the order placed, or None.
+
+        Runs on EVERY tick. Execution is always on — no toggle.
+        """
         if symbol not in self.symbols:
             return None
         if price <= 0:
             return None
 
-        # Update peak/trough tracking in signal state
+        self._current_prices[symbol] = price
         self.signal_state.update_peak_trough(symbol, price)
 
-        # Cooldown check
+        # Cooldown check (ms-based, prevents rapid-fire execution attempts)
         now_ms = time.time() * 1000
         last_attempt = self._last_execution_attempt.get(symbol, 0)
         if now_ms - last_attempt < self.settings.EXECUTION_COOLDOWN_MS:
@@ -64,8 +107,27 @@ class ExecutionEngine:
         target_direction = self.signal_state.get_direction(symbol)
         entry_price = self._entry_prices.get(symbol, 0.0)
 
-        # Priority 1: Emergency exit
+        logger.debug(
+            "tick",
+            extra={
+                "symbol": symbol,
+                "price": price,
+                "current_size": round(current_size, 8),
+                "current_dir": current_direction,
+                "target_dir": target_direction,
+                "entry_price": entry_price,
+                "pending_reversal": self._pending_reversal.get(symbol),
+                "cooldown": self.signal_state.is_in_cooldown(symbol, self.settings.COOLDOWN_BARS) if current_size == 0 else False,
+            },
+        )
+
+        # ==============================================================
+        # EXIT CHECKS (only if we have a position)
+        # ==============================================================
+
         if current_size > 0 and entry_price > 0:
+
+            # Priority 1: Emergency exit — hard adverse move >= EMERGENCY_EXIT_PCT
             if current_direction > 0:  # long
                 adverse_pct = (entry_price - price) / entry_price
             else:  # short
@@ -85,13 +147,10 @@ class ExecutionEngine:
                     symbol, price, reason="emergency_exit"
                 )
 
-        # Priority 2: ATR trailing stop
-        if current_size > 0 and entry_price > 0:
+            # Priority 2: ATR trailing stop
             atr = self.signal_state.signal_atr.get(symbol, 0.0)
             if atr > 0:
-                # Get ATR_STOP_MULT from strategy — we use a fixed 8.0 as the strategy default
-                # The strategy_15m.py has ATR_STOP_MULT = 8.0
-                atr_stop_mult = 8.0  # matches strategy_15m.py constant
+                atr_stop_mult = self.settings.ATR_STOP_MULT
 
                 if current_direction > 0:  # long
                     peak = self.signal_state.peak_prices.get(symbol, entry_price)
@@ -126,22 +185,49 @@ class ExecutionEngine:
                             symbol, price, reason="atr_stop"
                         )
 
-        # Priority 3: Signal flip to flat
-        if current_size > 0 and target_direction == 0:
-            logger.info(
-                "Signal flip to flat",
-                extra={"symbol": symbol, "from_direction": current_direction},
-            )
-            return await self._close_position(symbol, price, reason="signal_flat")
+            # Priority 3: Take profit
+            if current_direction > 0:  # long
+                pnl_pct = (price - entry_price) / entry_price
+            else:  # short
+                pnl_pct = (entry_price - price) / entry_price
 
-        # Priority 4: Signal reversal — close first
+            if pnl_pct >= self.settings.TAKE_PROFIT_PCT:
+                logger.info(
+                    "Take profit triggered",
+                    extra={
+                        "symbol": symbol,
+                        "entry": entry_price,
+                        "price": price,
+                        "pnl_pct": f"{pnl_pct:.2%}",
+                    },
+                )
+                return await self._close_position(
+                    symbol, price, reason="take_profit"
+                )
+
+        bars_held = self.signal_state.bar_count - self.signal_state.entry_bar.get(symbol, 0)
+        min_hold_active = bars_held < self.settings.MIN_HOLD_BARS
+
+        # Priority 4: Signal flip to flat — require EXIT_CONVISTION_BARS consecutive flat bars
+        if current_size > 0 and target_direction == 0 and not min_hold_active:
+            flat_bars = self.signal_state.flat_count.get(symbol, 0)
+            if flat_bars >= self.settings.EXIT_CONVICTION_BARS:
+                logger.info(
+                    "Signal flip to flat",
+                    extra={"symbol": symbol, "from_direction": current_direction, "flat_bars": flat_bars},
+                )
+                return await self._close_position(symbol, price, reason="signal_flat")
+
+        # Priority 5: Signal reversal — close now, re-enter on next tick (Option A)
         if (
             current_size > 0
             and target_direction != 0
             and target_direction != current_direction
+            and not min_hold_active
         ):
+            self._pending_reversal[symbol] = target_direction
             logger.info(
-                "Signal reversal — closing position",
+                "Signal reversal — closing, will re-enter on next tick",
                 extra={
                     "symbol": symbol,
                     "from": current_direction,
@@ -150,66 +236,229 @@ class ExecutionEngine:
             )
             return await self._close_position(symbol, price, reason="signal_reversal")
 
-        # Priority 5: Signal entry with slippage guard
-        if current_size == 0 and target_direction != 0:
-            signal_entry = self.signal_state.signal_entry.get(symbol, 0.0)
-            if signal_entry > 0:
-                slippage = abs(price - signal_entry) / signal_entry
-                if slippage > self.settings.ENTRY_SLIPPAGE_PCT:
-                    logger.info(
-                        "Entry skipped — slippage too high",
-                        extra={
-                            "symbol": symbol,
-                            "signal_entry": signal_entry,
-                            "price": price,
-                            "slippage_pct": f"{slippage:.2%}",
-                            "max_slippage_pct": f"{self.settings.ENTRY_SLIPPAGE_PCT:.2%}",
-                        },
+        # ==============================================================
+        # ENTRY CHECKS (only if we're flat)
+        # ==============================================================
+
+        if current_size == 0:
+            # Check for pending reversal first (Option A: re-enter after close)
+            pending_dir = self._pending_reversal.get(symbol, None)
+            if pending_dir is not None:
+                effective_direction = pending_dir
+            else:
+                effective_direction = target_direction
+
+            if effective_direction != 0:
+                # Bar-based cooldown — skip for pending reversals (Option A: re-enter on next tick)
+                if pending_dir is None and self.signal_state.is_in_cooldown(
+                    symbol, self.settings.COOLDOWN_BARS
+                ):
+                    logger.debug(
+                        "Entry skipped — cooldown active",
+                        extra={"symbol": symbol},
                     )
                     self._last_execution_attempt[symbol] = now_ms
                     return None
 
-            # Get target USD notional from signal state
-            target_usd = self.signal_state.get_target(symbol)
-            if target_usd == 0 and target_direction != 0:
-                # No target stored, skip
-                return None
+                # Slippage guard
+                signal_entry = self.signal_state.signal_entry.get(symbol, 0.0)
+                if signal_entry > 0:
+                    slippage = abs(price - signal_entry) / signal_entry
+                    if slippage > self.settings.ENTRY_SLIPPAGE_PCT:
+                        logger.info(
+                            "Entry skipped — slippage too high",
+                            extra={
+                                "symbol": symbol,
+                                "signal_entry": signal_entry,
+                                "price": price,
+                                "slippage_pct": f"{slippage:.2%}",
+                                "max_slippage_pct": (
+                                    f"{self.settings.ENTRY_SLIPPAGE_PCT:.2%}"
+                                ),
+                            },
+                        )
+                        self._last_execution_attempt[symbol] = now_ms
+                        return None
 
-            size_coins = abs(target_usd) / price
-            if size_coins < 0.00001:
-                return None
+                # Direction-aware momentum sizing
+                target_usd = self._calculate_position_size(symbol, effective_direction, is_pending_reversal=(pending_dir is not None))
+                if target_usd <= 0:
+                    if pending_dir is not None:
+                        logger.warning(
+                            "Pending reversal vetoed by momentum — will retry next tick",
+                            extra={"symbol": symbol, "direction": effective_direction},
+                        )
+                    else:
+                        logger.debug(
+                            "Entry skipped — momentum sizing returned 0",
+                            extra={
+                                "symbol": symbol,
+                                "direction": effective_direction,
+                            },
+                        )
+                    self._last_execution_attempt[symbol] = now_ms
+                    return None
 
-            side = OrderSide.BUY if target_direction > 0 else OrderSide.SELL
+                # Risk controller: block new entries when trading is disabled
+                if self._risk_controller:
+                    if not self._risk_controller.is_trading_enabled():
+                        logger.debug(
+                            "Entry skipped — trading disabled by risk controls",
+                            extra={"symbol": symbol},
+                        )
+                        self._last_execution_attempt[symbol] = now_ms
+                        return None
 
-            logger.info(
-                "Entry signal executing",
-                extra={
-                    "symbol": symbol,
-                    "side": side.value,
-                    "size_coins": round(size_coins, 8),
-                    "price": price,
-                    "target_usd": target_usd,
-                },
-            )
+                # Position limiter: cap entry size by MAX_POSITION_PCT
+                if self._position_limiter and self._equity > 0:
+                    max_notional = self._equity * self.settings.MAX_POSITION_PCT
+                    if target_usd > max_notional:
+                        target_usd = max_notional
+                        logger.info(
+                            "Entry size limited by MAX_POSITION_PCT",
+                            extra={"symbol": symbol, "adjusted_usd": round(target_usd, 2)},
+                        )
 
-            order = await self.client.place_order(
-                symbol=symbol,
-                side=side,
-                size=round(size_coins, 8),
-                order_type=OrderType.MARKET,
-                reduce_only=False,
-            )
+                # Block entry if it would breach MAX_LEVERAGE across all positions
+                if self._equity > 0 and self.settings.MAX_LEVERAGE > 0:
+                    current_exposure = sum(
+                        size * self._current_prices.get(sym, 0)
+                        for sym, size in self._position_sizes.items()
+                        if size > 0
+                    )
+                    max_exposure = self._equity * self.settings.MAX_LEVERAGE
+                    if current_exposure + target_usd > max_exposure:
+                        logger.info(
+                            "Entry blocked — total exposure would exceed MAX_LEVERAGE",
+                            extra={
+                                "symbol": symbol,
+                                "current_exposure": round(current_exposure, 2),
+                                "target_usd": round(target_usd, 2),
+                                "max_exposure": round(max_exposure, 2),
+                                "leverage": f"{(current_exposure + target_usd) / self._equity:.2f}x",
+                            },
+                        )
+                        self._last_execution_attempt[symbol] = now_ms
+                        return None
 
-            if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
-                self._position_sizes[symbol] = order.filled_size
-                self._entry_prices[symbol] = order.avg_fill_price or price
-                self._last_executed_direction[symbol] = target_direction
+                size_coins = target_usd / price
+                if size_coins < 0.00001:
+                    return None
 
-            self._last_execution_attempt[symbol] = now_ms
-            return order
+                side = OrderSide.BUY if effective_direction > 0 else OrderSide.SELL
 
-        # Priority 6: Hold
+                logger.info(
+                    "Entry signal executing",
+                    extra={
+                        "symbol": symbol,
+                        "side": side.value,
+                        "size_coins": round(size_coins, 8),
+                        "price": price,
+                        "target_usd": target_usd,
+                        "direction": effective_direction,
+                    },
+                )
+
+                order = await self.client.place_order(
+                    symbol=symbol,
+                    side=side,
+                    size=round(size_coins, 8),
+                    order_type=OrderType.MARKET,
+                    reduce_only=False,
+                )
+
+                if order.status in (
+                    OrderStatus.FILLED,
+                    OrderStatus.PARTIALLY_FILLED,
+                ):
+                    self._position_sizes[symbol] = order.filled_size
+                    self._entry_prices[symbol] = order.avg_fill_price or price
+                    self._last_executed_direction[symbol] = effective_direction
+                    self.signal_state.entry_bar[symbol] = self.signal_state.bar_count
+                    self._pending_reversal.pop(symbol, None)
+                elif pending_dir is not None:
+                    self._pending_reversal.pop(symbol, None)
+
+                self._last_execution_attempt[symbol] = now_ms
+                return order
+
+        # Hold — no action
         return None
+
+    # ------------------------------------------------------------------
+    # Position sizing
+    # ------------------------------------------------------------------
+
+    def _calculate_position_size(self, symbol: str, direction: int, is_pending_reversal: bool = False) -> float:
+        """Direction-aware momentum sizing.
+
+        Longs sized by positive momentum, shorts sized by negative momentum.
+        Each side normalized independently so strongest conviction gets most capital.
+
+        Returns target USD notional (always positive).
+        """
+        momentum = self.signal_state.momentum.get(symbol, 0.0)
+
+        in_grace = False
+        if is_pending_reversal:
+            exit_bar = self.signal_state.last_exit_bar.get(symbol, -999)
+            bars_since_exit = self.signal_state.bar_count - exit_bar
+            if bars_since_exit <= self.settings.REENTRY_GRACE_BARS:
+                in_grace = True
+
+        if not in_grace:
+            if direction > 0 and momentum < -self.settings.MOMENTUM_VETO_THRESHOLD:
+                logger.debug(
+                    "momentum veto: long signal but strongly negative momentum",
+                    extra={"symbol": symbol, "momentum": momentum, "direction": direction},
+                )
+                return 0.0
+            if direction < 0 and momentum > self.settings.MOMENTUM_VETO_THRESHOLD:
+                logger.debug(
+                    "momentum veto: short signal but strongly positive momentum",
+                    extra={"symbol": symbol, "momentum": momentum, "direction": direction},
+                )
+                return 0.0
+
+        equity = self._equity
+        if equity <= 0:
+            return 0.0
+
+        # Collect all symbols with same-direction momentum for normalization
+        same_direction_momenta: Dict[str, float] = {}
+        for sym, mom in self.signal_state.momentum.items():
+            sym_dir = self.signal_state.get_direction(sym)
+            if sym_dir == direction and abs(mom) > 0:
+                same_direction_momenta[sym] = mom
+
+        total_momentum = sum(same_direction_momenta.values())
+        if total_momentum == 0:
+            # Fallback: equal weight across all symbols
+            return equity * self.settings.BASE_POSITION_PCT
+
+        weight = momentum / total_momentum
+        size = equity * self.settings.BASE_POSITION_PCT * weight * len(self.symbols)
+        # len(self.symbols) multiplier because each symbol gets BASE_POSITION_PCT
+        # of equity, distributed by momentum so strongest conviction gets most.
+
+        logger.debug(
+            "position sized",
+            extra={
+                "symbol": symbol,
+                "momentum": momentum,
+                "weight": round(weight, 4),
+                "total_momentum": round(total_momentum, 6),
+                "same_dir_symbols": list(same_direction_momenta.keys()),
+                "equity": round(equity, 2),
+                "target_usd": round(size, 2),
+            },
+        )
+
+        return size
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     async def _close_position(
         self, symbol: str, price: float, reason: str
@@ -233,19 +482,39 @@ class ExecutionEngine:
             },
         )
 
-        order = await self.client.place_order(
-            symbol=symbol,
-            side=close_side,
-            size=round(current_size, 8),
-            order_type=OrderType.MARKET,
-            reduce_only=True,
+        # Capture close info BEFORE the await to prevent race condition:
+        # _on_bar can fire during await and overwrite _last_executed_direction.
+        self._pending_close_info[symbol] = (
+            self._entry_prices.get(symbol, 0.0),
+            current_direction,
         )
+
+        self._closing.add(symbol)
+
+        try:
+            order = await self.client.place_order(
+                symbol=symbol,
+                side=close_side,
+                size=round(current_size, 8),
+                order_type=OrderType.MARKET,
+                reduce_only=True,
+            )
+        finally:
+            self._closing.discard(symbol)
 
         if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             self._position_sizes[symbol] = 0.0
             self._entry_prices[symbol] = 0.0
             self._last_executed_direction[symbol] = 0
-            self.signal_state.clear_signal(symbol)
+
+            # Reset peak/trough for fresh start on re-entry.
+            # Do NOT clear direction — it persists from hourly bar close.
+            self.signal_state.peak_prices[symbol] = price
+            self.signal_state.trough_prices[symbol] = price
+
+            # Record exit for bar-based cooldown tracking
+            self.signal_state.record_exit(symbol, self.signal_state.bar_count)
+            self.signal_state.entry_bar.pop(symbol, None)
 
             # Notify bot to cancel exchange-side stop
             if self.on_position_closed:
@@ -260,7 +529,8 @@ class ExecutionEngine:
                     )
         else:
             logger.warning(
-                "Close order did not fill — clearing internal tracking (position may have been closed externally)",
+                "Close order did not fill — clearing internal tracking "
+                "(position may have been closed externally)",
                 extra={
                     "symbol": symbol,
                     "status": order.status.value,
@@ -279,21 +549,20 @@ class ExecutionEngine:
     ) -> None:
         """Resync position tracking from exchange state. Called on bar close."""
         for symbol in self.symbols:
+            if symbol in self._closing:
+                continue
             pos = account_state.positions.get(symbol)
             if pos and pos.size > 0:
                 self._position_sizes[symbol] = pos.size
                 if pos.entry_price > 0:
                     self._entry_prices[symbol] = pos.entry_price
-                # Determine direction from position size/sign
-                # In our system, positions are stored as positive coin quantities
-                # Direction comes from the signal state
-                direction = self.signal_state.get_direction(symbol)
-                if direction != 0:
-                    self._last_executed_direction[symbol] = direction
-                elif self._last_executed_direction.get(symbol) == 0:
-                    # We have a position but no direction — infer from signal state target
-                    target = self.signal_state.get_target(symbol)
-                    self._last_executed_direction[symbol] = 1 if target > 0 else -1
+                # Always use the position's actual side from the exchange.
+                # The signal direction is used by on_tick() exit logic to detect mismatches.
+                self._last_executed_direction[symbol] = (
+                    1 if pos.side == PositionSide.LONG else -1
+                )
+                if symbol not in self.signal_state.entry_bar:
+                    self.signal_state.entry_bar[symbol] = max(0, self.signal_state.bar_count - self.settings.MIN_HOLD_BARS)
             else:
                 if self._position_sizes.get(symbol, 0.0) > 0:
                     logger.info(
@@ -310,3 +579,7 @@ class ExecutionEngine:
         self._entry_prices.clear()
         self._last_executed_direction.clear()
         self._last_execution_attempt.clear()
+        self._pending_reversal.clear()
+        self._pending_close_info.clear()
+        self._closing.clear()
+        self._current_prices.clear()

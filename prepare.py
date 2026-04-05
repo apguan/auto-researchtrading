@@ -11,7 +11,8 @@ import os
 import time
 import math
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401 — used by re-exports
+from strategy_types import BarData, Signal, PortfolioState, BacktestResult  # noqa: F401
 
 import numpy as np
 import pandas as pd
@@ -29,7 +30,40 @@ MAX_LEVERAGE = 20  # max leverage allowed
 LOOKBACK_BARS = 500  # history buffer provided to strategy
 BAR_INTERVAL = "1h"
 
-SYMBOLS = BENCHMARK_SYMBOLS
+def _discover_symbols() -> list[str]:
+    """Discover tradeable USDC cross-margin perps from Hyperliquid.
+
+    Filters: delisted, isolated-only, 24h volume < $10M.
+    Falls back to BENCHMARK_SYMBOLS on any failure.
+    """
+    try:
+        resp = requests.post(
+            HL_INFO_URL,
+            json={"type": "metaAndAssetCtxs"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        meta, asset_ctxs = resp.json()
+
+        perps: list[str] = []
+        for asset, ctx in zip(meta.get("universe", []), asset_ctxs):
+            if asset.get("isDelisted", False):
+                continue
+            if asset.get("onlyIsolated"):
+                continue
+            margin_mode = asset.get("marginMode")
+            if margin_mode in ("strictIsolated", "noCross"):
+                continue
+            vol = float(ctx.get("dayNtlVlm", 0))
+            if vol < 10_000_000:
+                continue
+            perps.append(asset["name"])
+        return sorted(perps)
+    except Exception:
+        return list(BENCHMARK_SYMBOLS)
+
+
+SYMBOLS = _discover_symbols()
 
 # Date splits (UTC timestamps)
 TRAIN_START = "2023-06-01"
@@ -49,51 +83,8 @@ CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autotrader")
 DATA_DIR = os.path.join(CACHE_DIR, "data")
 
 # ---------------------------------------------------------------------------
-# Data types
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class BarData:
-    symbol: str
-    timestamp: int
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    funding_rate: float
-    history: pd.DataFrame  # last LOOKBACK_BARS bars
-
-
-@dataclass
-class Signal:
-    symbol: str
-    target_position: float  # target USD notional (signed: +long, -short)
-    order_type: str = "market"
-
-
-@dataclass
-class PortfolioState:
-    cash: float
-    positions: dict  # symbol -> signed USD notional
-    entry_prices: dict  # symbol -> avg entry price
-    equity: float = 0.0
-    timestamp: int = 0
-
-
-@dataclass
-class BacktestResult:
-    sharpe: float = 0.0
-    total_return_pct: float = 0.0
-    max_drawdown_pct: float = 0.0
-    num_trades: int = 0
-    win_rate_pct: float = 0.0
-    profit_factor: float = 0.0
-    annual_turnover: float = 0.0
-    backtest_seconds: float = 0.0
-    equity_curve: list = field(default_factory=list)
-    trade_log: list = field(default_factory=list)
+# Data types — defined in strategy_types.py, re-exported here for backward compat.
+# BarData, Signal, PortfolioState, BacktestResult available as prepare.BarData etc.
 
 
 # ---------------------------------------------------------------------------
@@ -289,15 +280,19 @@ def download_data(symbols=None):
 
 def load_data(split: str = "val") -> dict:
     """Load OHLCV+funding data for the given split. Returns {symbol: DataFrame}."""
-    splits = {
-        "train": (TRAIN_START, TRAIN_END),
-        "val": (VAL_START, VAL_END),
-        "test": (TEST_START, TEST_END),
-    }
-    assert split in splits, f"split must be one of {list(splits.keys())}"
-    start_str, end_str = splits[split]
-    start_ms = pd.Timestamp(start_str, tz="UTC").value // 1_000_000
-    end_ms = pd.Timestamp(end_str, tz="UTC").value // 1_000_000
+    if os.environ.get("DAILY_MODE", "").lower() in ("1", "true", "yes"):
+        start_ms = 0
+        end_ms = float("inf")
+    else:
+        splits = {
+            "train": (TRAIN_START, TRAIN_END),
+            "val": (VAL_START, VAL_END),
+            "test": (TEST_START, TEST_END),
+        }
+        assert split in splits, f"split must be one of {list(splits.keys())}"
+        start_str, end_str = splits[split]
+        start_ms = pd.Timestamp(start_str, tz="UTC").value // 1_000_000
+        end_ms = pd.Timestamp(end_str, tz="UTC").value // 1_000_000
 
     result = {}
     for symbol in SYMBOLS:
@@ -305,8 +300,11 @@ def load_data(split: str = "val") -> dict:
         if not os.path.exists(filepath):
             continue
         df = pd.read_parquet(filepath)
-        mask = (df["timestamp"] >= start_ms) & (df["timestamp"] < end_ms)
-        split_df = df[mask].reset_index(drop=True)
+        if start_ms > 0:
+            mask = (df["timestamp"] >= start_ms) & (df["timestamp"] < end_ms)
+            split_df = df[mask].reset_index(drop=True)
+        else:
+            split_df = df
         if len(split_df) > 0:
             result[symbol] = split_df
     return result

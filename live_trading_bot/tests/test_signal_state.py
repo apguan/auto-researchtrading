@@ -59,3 +59,31 @@ class TestSignalState:
     def test_get_direction_unknown_symbol(self):
         s = SignalState()
         assert s.get_direction("DOGE") == 0
+
+    def test_is_in_cooldown_blocks_then_allows(self):
+        s = SignalState()
+        assert s.is_in_cooldown("BTC", 3) is False
+
+        s.bar_count = 10
+        s.record_exit("BTC", 10)
+
+        for bar in (10, 11, 12):
+            s.bar_count = bar
+            assert s.is_in_cooldown("BTC", 3) is True
+
+        s.bar_count = 13
+        assert s.is_in_cooldown("BTC", 3) is False
+
+    def test_flat_count_increments_on_flat_direction(self):
+        s = SignalState()
+        s.set_direction("BTC", 0, 0.0, 50.0, 50000.0, bar_count=1)
+        assert s.flat_count["BTC"] == 1
+        s.set_direction("BTC", 0, 0.0, 50.0, 50000.0, bar_count=2)
+        assert s.flat_count["BTC"] == 2
+
+    def test_flat_count_resets_on_nonflat_direction(self):
+        s = SignalState()
+        s.set_direction("BTC", 0, 0.0, 50.0, 50000.0, bar_count=1)
+        assert s.flat_count["BTC"] == 1
+        s.set_direction("BTC", 1, 0.05, 50.0, 50000.0, bar_count=2)
+        assert s.flat_count["BTC"] == 0

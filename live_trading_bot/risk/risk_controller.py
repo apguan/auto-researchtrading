@@ -38,6 +38,9 @@ class RiskController:
 
         if self.daily_start_equity is None or now.hour == 0 and now.minute == 0:
             self.daily_start_equity = account_state.total_equity
+            if not self.trading_enabled:
+                self.trading_enabled = True
+                logger.info("Daily loss limit auto-reset at midnight")
 
         daily_pnl_db = await self.db.get_daily_pnl()
         daily_pnl_pct = (

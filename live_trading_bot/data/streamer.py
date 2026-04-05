@@ -53,9 +53,6 @@ class DataStreamer:
         self._bar_count_since_funding_fetch: int = 0
         self._FUNDING_FETCH_INTERVAL: int = 8
 
-        # Bar batching: collect per-symbol completions, fire callback once per interval
-        self._pending_bar_symbols: set = set()
-        self._batch_interval_ts: Optional[int] = None
 
     async def start(self, client: Optional[Exchange] = None):
         self._running = True
@@ -240,30 +237,9 @@ class DataStreamer:
                 )
 
     async def _on_symbol_bar_complete(self, symbol: str, candle: Candle):
-        """Collect per-symbol bar completions into a batch.
-
-        Only fires the callback when ALL symbols have reported for the interval.
-        No early/partial flush — that was causing duplicate order execution when
-        late-arriving symbols (SOL) split the batch into two callbacks.
-        """
-        self._batch_interval_ts = candle.timestamp
-        self._pending_bar_symbols.add(symbol)
-
-        if self._pending_bar_symbols >= set(self.symbols):
-            await self._flush_bar_batch()
-
-    async def _flush_bar_batch(self):
-        """Fire the bot callback once for the collected batch."""
-        symbols = list(self._pending_bar_symbols)
-        self._pending_bar_symbols.clear()
-        self._batch_interval_ts = None
-
-        if not symbols:
-            return
-
+        """Fire the bar callback immediately for each symbol independently."""
         if self.on_bar_callback:
-            await self._safe_callback(self.on_bar_callback, symbols[0],
-                self.bar_builder.get_history(symbols[0])[-1] if self.bar_builder.get_history(symbols[0]) else None)
+            await self._safe_callback(self.on_bar_callback, symbol, candle)
 
     async def _on_bar_for_funding(self, symbol: str, candle: Candle):
         self._bar_count_since_funding_fetch += 1

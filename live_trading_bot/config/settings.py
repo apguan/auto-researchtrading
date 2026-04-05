@@ -10,8 +10,73 @@ if str(_REPO_ROOT) not in sys.path:
 
 from constants import ALL_SYMBOLS, INTERVAL_SYMBOLS, make_equal_weights, LOOKBACK_BARS
 from constants import STRATEGY_DEFAULTS as _STRATEGY_DEFAULTS
+from constants import PARAM_COLUMNS, INT_PARAMS as _INT_PARAMS
+from constants import HYPERLIQUID_API_URL
 
 _HOUR_DEFAULTS = _STRATEGY_DEFAULTS["1h"]
+
+
+def _discover_usdc_cross_margin_perps() -> list[str]:
+    try:
+        import asyncio
+        from hyperliquid.info import Info
+        from live_trading_bot.exchange.hyperliquid import fetch_usdc_cross_margin_perps
+
+        info = Info(base_url=HYPERLIQUID_API_URL, skip_ws=True)
+        return asyncio.run(fetch_usdc_cross_margin_perps(info))
+    except Exception:
+        return list(ALL_SYMBOLS)
+
+
+def _load_active_db_params() -> dict[str, int | float | list[str]]:
+    """Load the active 1h params from param_snapshots (is_active=TRUE).
+
+    Returns a dict of param_name -> value, plus 'TRADING_PAIRS' from
+    the snapshot's symbol column. Empty dict on any failure.
+    """
+    db_url = os.environ.get("SUPABASE_DB_URL", "")
+    if not db_url:
+        return {}
+
+    try:
+        import psycopg2
+
+        with psycopg2.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                select_cols = ", ".join(PARAM_COLUMNS)
+                cur.execute(
+                    f"SELECT symbol, {select_cols} "
+                    "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
+                    "ORDER BY run_date DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {}
+
+                symbol_str = row[0]
+                params: dict[str, int | float | list[str]] = {}
+                for name, val in zip(PARAM_COLUMNS, row[1:]):
+                    if name in _INT_PARAMS:
+                        params[name] = int(val)
+                    else:
+                        params[name] = float(val)
+
+                if symbol_str and symbol_str != "ALL":
+                    symbols = [s.strip() for s in symbol_str.split(",") if s.strip()]
+                    if symbols:
+                        params["TRADING_PAIRS"] = symbols
+
+                from live_trading_bot.monitoring.logger import get_logger
+
+                get_logger(__name__).info(
+                    "Loaded strategy params from DB",
+                    extra={"param_count": len(params), "symbols": symbol_str},
+                )
+                return params
+    except Exception:
+        from live_trading_bot.monitoring.logger import get_logger
+        get_logger(__name__).warning("Failed to load params from DB — using defaults", exc_info=True)
+        return {}
 
 
 @dataclass
@@ -20,13 +85,10 @@ class Settings:
     SYMBOL_WEIGHTS: Dict[str, float] = field(
         default_factory=lambda: make_equal_weights(ALL_SYMBOLS)
     )
-    BAR_INTERVAL: str = "15m"
-    # LOOKBACK_BARS scales per interval: 1m→2000, 5m→1000, 15m→500, 1h→500
+    BAR_INTERVAL: str = "1h"
     LOOKBACK_BARS: int = 500
-    # Module path for the backtest strategy; auto-derived from BAR_INTERVAL in from_env()
-    STRATEGY_MODULE: str = "strategies.strategy_15m"
 
-    BASE_POSITION_PCT: float = 0.08
+    BASE_POSITION_PCT: float = float(_HOUR_DEFAULTS["BASE_POSITION_PCT"])
     MAX_POSITION_PCT: float = 0.30
     MAX_LEVERAGE: float = 3.0
 
@@ -34,7 +96,9 @@ class Settings:
     VOLATILITY_CIRCUIT_BREAKER_PCT: float = 0.05
     VOLATILITY_LOOKBACK_MINUTES: int = 10
 
-    COOLDOWN_BARS: int = 2
+    COOLDOWN_BARS: int = int(_HOUR_DEFAULTS["COOLDOWN_BARS"])
+    EXIT_CONVICTION_BARS: int = int(_HOUR_DEFAULTS["EXIT_CONVICTION_BARS"])
+    MIN_HOLD_BARS: int = int(_HOUR_DEFAULTS["MIN_HOLD_BARS"])
     MIN_VOTES: int = 4
 
     SHORT_WINDOW: int = int(_HOUR_DEFAULTS["SHORT_WINDOW"])
@@ -54,9 +118,14 @@ class Settings:
     BB_PERIOD: int = int(_HOUR_DEFAULTS["BB_PERIOD"])
     ATR_LOOKBACK: int = int(_HOUR_DEFAULTS["ATR_LOOKBACK"])
     ATR_STOP_MULT: float = float(_HOUR_DEFAULTS["ATR_STOP_MULT"])
+    TAKE_PROFIT_PCT: float = float(_HOUR_DEFAULTS["TAKE_PROFIT_PCT"])
     TARGET_VOL: float = float(_HOUR_DEFAULTS["TARGET_VOL"])
     VOL_LOOKBACK: int = int(_HOUR_DEFAULTS["VOL_LOOKBACK"])
     BASE_THRESHOLD: float = float(_HOUR_DEFAULTS["BASE_THRESHOLD"])
+
+    MOMENTUM_VETO_THRESHOLD: float = float(_HOUR_DEFAULTS["MOMENTUM_VETO_THRESHOLD"])
+    REENTRY_GRACE_BARS: int = int(_HOUR_DEFAULTS["REENTRY_GRACE_BARS"])
+    OBV_MA_PERIOD: int = int(_HOUR_DEFAULTS["OBV_MA_PERIOD"])
 
     HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
     HYPERLIQUID_WS_URL: str = "wss://api.hyperliquid.xyz/ws"
@@ -68,6 +137,7 @@ class Settings:
     DB_PATH: str = "trading_bot.db"
     SUPABASE_DB_URL: str = ""
     LOG_PATH: str = "logs/bot.log"
+    LOG_LEVEL: str = "INFO"
 
     ALERT_INTERVAL_HOURS: float = 1.0
     ALERT_ON_TRADE: bool = True
@@ -76,10 +146,10 @@ class Settings:
     ALERT_INSTANCE_NAME: str = ""
 
     DRY_RUN: bool = False
-    DRY_RUN_INITIAL_CAPITAL: float = 100_000.0
+    DRY_RUN_INITIAL_CAPITAL: float = 10_000.0
+    DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
 
     # Tick execution settings
-    TICK_EXECUTION_ENABLED: bool = False
     ENTRY_SLIPPAGE_PCT: float = 0.02
     EXECUTION_COOLDOWN_MS: int = 5000
 
@@ -106,9 +176,7 @@ class Settings:
         if val := os.getenv("TRADING_PAIRS"):
             settings.TRADING_PAIRS = val.split(",")
         else:
-            settings.TRADING_PAIRS = list(
-                INTERVAL_SYMBOLS.get(settings.BAR_INTERVAL, ALL_SYMBOLS)
-            )
+            settings.TRADING_PAIRS = _discover_usdc_cross_margin_perps()
         settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
 
         if val := os.getenv("MAX_LEVERAGE"):
@@ -132,37 +200,31 @@ class Settings:
         if val := os.getenv("SUPABASE_DB_URL"):
             settings.SUPABASE_DB_URL = val
 
-        if val := os.getenv("STRATEGY_MODULE"):
-            settings.STRATEGY_MODULE = val
-        else:
-            _interval_strategy_map = {
-                "1m": "strategies.strategy_1m",
-                "5m": "strategies.strategy_5m",
-                "15m": "strategies.strategy_15m",
-                "1h": "_bt_strategy",
-            }
-            settings.STRATEGY_MODULE = _interval_strategy_map.get(
-                settings.BAR_INTERVAL, "strategies.strategy_15m"
-            )
+        if val := os.getenv("LOG_LEVEL"):
+            settings.LOG_LEVEL = val.upper()
 
         if val := os.getenv("LOOKBACK_BARS"):
             settings.LOOKBACK_BARS = int(val)
         else:
-            # Must be >= strategy's max(LONG_WINDOW, ...) + 1 to generate signals.
-            # 1m LONG_WINDOW=720 needs 721+; 5m LONG_WINDOW=432 needs 433+.
             settings.LOOKBACK_BARS = LOOKBACK_BARS.get(settings.BAR_INTERVAL, 500)
 
         if val := os.getenv("DRY_RUN_INITIAL_CAPITAL"):
             settings.DRY_RUN_INITIAL_CAPITAL = float(val)
 
-        if val := os.getenv("TICK_EXECUTION_ENABLED"):
-            settings.TICK_EXECUTION_ENABLED = val.lower() in ("true", "1", "yes")
+        if val := os.getenv("DRY_RUN_STATE_PATH"):
+            settings.DRY_RUN_STATE_PATH = val
 
         if val := os.getenv("ENTRY_SLIPPAGE_PCT"):
             settings.ENTRY_SLIPPAGE_PCT = float(val)
 
         if val := os.getenv("EXECUTION_COOLDOWN_MS"):
             settings.EXECUTION_COOLDOWN_MS = int(val)
+
+        if val := os.getenv("EXIT_CONVICTION_BARS"):
+            settings.EXIT_CONVICTION_BARS = int(val)
+
+        if val := os.getenv("MIN_HOLD_BARS"):
+            settings.MIN_HOLD_BARS = int(val)
 
         if val := os.getenv("EMERGENCY_EXIT_PCT"):
             settings.EMERGENCY_EXIT_PCT = float(val)
@@ -191,10 +253,36 @@ class Settings:
         if val := os.getenv("ALERT_INSTANCE_NAME"):
             settings.ALERT_INSTANCE_NAME = val
 
+        if val := os.getenv("MOMENTUM_VETO_THRESHOLD"):
+            settings.MOMENTUM_VETO_THRESHOLD = float(val)
+
+        if val := os.getenv("REENTRY_GRACE_BARS"):
+            settings.REENTRY_GRACE_BARS = int(val)
+
+        if val := os.getenv("OBV_MA_PERIOD"):
+            settings.OBV_MA_PERIOD = int(val)
+
+        _apply_db_params(settings)
+
         return settings
 
 
 _settings: Settings | None = None
+
+
+def _apply_db_params(settings: Settings) -> None:
+    db_params = _load_active_db_params()
+    if not db_params:
+        return
+
+    trading_pairs = db_params.pop("TRADING_PAIRS", None)
+    for name, val in db_params.items():
+        if hasattr(settings, name):
+            setattr(settings, name, val)
+
+    if trading_pairs:
+        settings.TRADING_PAIRS = trading_pairs
+        settings.SYMBOL_WEIGHTS = make_equal_weights(trading_pairs)
 
 
 def get_settings() -> Settings:

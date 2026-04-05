@@ -1,79 +1,51 @@
 """
-Exp32: Add Bollinger Band width as 6th signal for vol compression detection.
+Exp322: RSI_BULL=38 RSI_BEAR=62 wider at new baseline.
 
-Changes from exp28 (ATR 5.5, score 9.382):
-1. Add BB width signal: bullish when BB width is below median (compression = pending breakout)
-2. Keep MIN_VOTES at 4 but out of 6 signals now
-3. BB compression acts as a quality filter for entries
+Changes from exp302 (score 16.145):
+1. RSI_BULL=38 (was 40), RSI_BEAR=62 (was 60) — much wider RSI entry zone.
+   39/61 scored 16.142. Test 38/62.
 """
 
 import numpy as np
-from prepare import Signal
-from constants import INTERVAL_SYMBOLS, make_equal_weights
+from strategy_utils import ema, calc_rsi, calc_atr, calc_vol, calc_macd, calc_bb_width_pctile
+from strategy_types import Signal
+from constants import INTERVAL_SYMBOLS
 
-ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]
-SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
+ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]  # fallback for _RUNTIME_SYMBOLS init; unused by on_bar
+
+# Populated on first on_bar() call with the symbols actually in bar_data.
+# Used by save_experiment_to_db() to persist the dynamic symbol set.
+_RUNTIME_SYMBOLS: list[str] = list(ACTIVE_SYMBOLS)
 
 SHORT_WINDOW = 6
-MED_WINDOW = 12
+MED_WINDOW = 11
 MED2_WINDOW = 24
-LONG_WINDOW = 36
-EMA_FAST = 7
-EMA_SLOW = 26
-RSI_PERIOD = 8
-RSI_BULL = 48
-RSI_BEAR = 52
-RSI_OVERBOUGHT = 75
-RSI_OVERSOLD = 25
+LONG_WINDOW = 48
+EMA_FAST = 3
+EMA_SLOW = 27
+RSI_PERIOD = 7
+RSI_BULL = 38
+RSI_BEAR = 62
+RSI_OVERBOUGHT = 74
+RSI_OVERSOLD = 26
 
-MACD_FAST = 14
-MACD_SLOW = 23
+MACD_FAST = 11
+MACD_SLOW = 21
 MACD_SIGNAL = 9
 
-BB_PERIOD = 5
+BB_PERIOD = 6
+OBV_MA_PERIOD = 26
 
-FUNDING_LOOKBACK = 24
-FUNDING_BOOST = 0.0
-BASE_POSITION_PCT = 0.088
-VOL_LOOKBACK = 36
-TARGET_VOL = 0.015
+BASE_POSITION_PCT = 0.060
+VOL_LOOKBACK = 41
+TARGET_VOL = 0.014
 ATR_LOOKBACK = 24
 ATR_STOP_MULT = 5.5
 TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
-BTC_OPPOSE_THRESHOLD = -99.0
-
-PYRAMID_THRESHOLD = 0.015
-PYRAMID_SIZE = 0.0
-CORR_LOOKBACK = 72
-HIGH_CORR_THRESHOLD = 99.0
-
-DD_REDUCE_THRESHOLD = 99.0
-DD_REDUCE_SCALE = 0.5
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 4  # out of 6 now
-
-
-def ema(values, span):
-    alpha = 2.0 / (span + 1)
-    result = np.empty_like(values, dtype=float)
-    result[0] = values[0]
-    for i in range(1, len(values)):
-        result[i] = alpha * values[i] + (1 - alpha) * result[i - 1]
-    return result
-
-
-def calc_rsi(closes, period):
-    if len(closes) < period + 1:
-        return 50.0
-    deltas = np.diff(closes[-(period + 1) :])
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
-    avg_gain = np.mean(gains)
-    avg_loss = np.mean(losses)
-    rs = avg_gain / max(avg_loss, 1e-10)
-    return 100 - 100 / (1 + rs)
+MIN_VOTES = 5  # out of 7
 
 
 class Strategy:
@@ -81,101 +53,27 @@ class Strategy:
         self.entry_prices = {}
         self.peak_prices = {}
         self.atr_at_entry = {}
-        self.btc_momentum = 0.0
-        self.pyramided = {}
-        self.peak_equity = 100000.0
         self.exit_bar = {}
         self.bar_count = 0
-
-    def _calc_atr(self, history, lookback):
-        if len(history) < lookback + 1:
-            return None
-        highs = history["high"].values[-lookback:]
-        lows = history["low"].values[-lookback:]
-        closes = history["close"].values[-(lookback + 1) : -1]
-        tr = np.maximum(
-            highs - lows, np.maximum(np.abs(highs - closes), np.abs(lows - closes))
-        )
-        return np.mean(tr)
-
-    def _calc_vol(self, closes, lookback):
-        if len(closes) < lookback:
-            return TARGET_VOL
-        valid = closes[-lookback:]
-        if np.any(valid <= 0):
-            return TARGET_VOL
-        log_rets = np.diff(np.log(valid))
-        vol = np.std(log_rets)
-        return max(vol, 1e-6) if np.isfinite(vol) else TARGET_VOL
-
-    def _calc_correlation(self, bar_data):
-        if "BTC" not in bar_data or "ETH" not in bar_data:
-            return 0.5
-        btc_h = bar_data["BTC"].history
-        eth_h = bar_data["ETH"].history
-        if len(btc_h) < CORR_LOOKBACK or len(eth_h) < CORR_LOOKBACK:
-            return 0.5
-        btc_rets = np.diff(np.log(btc_h["close"].values[-CORR_LOOKBACK:]))
-        eth_rets = np.diff(np.log(eth_h["close"].values[-CORR_LOOKBACK:]))
-        if len(btc_rets) < 10:
-            return 0.5
-        corr = np.corrcoef(btc_rets, eth_rets)[0, 1]
-        return corr if not np.isnan(corr) else 0.5
-
-    def _calc_macd(self, closes):
-        if len(closes) < MACD_SLOW + MACD_SIGNAL + 5:
-            return 0.0
-        fast_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5) :], MACD_FAST)
-        slow_ema = ema(closes[-(MACD_SLOW + MACD_SIGNAL + 5) :], MACD_SLOW)
-        macd_line = fast_ema - slow_ema
-        signal_line = ema(macd_line, MACD_SIGNAL)
-        return macd_line[-1] - signal_line[-1]
-
-    def _calc_bb_width_pctile(self, closes, period):
-        """Calculate current BB width percentile over lookback."""
-        if len(closes) < period * 3:
-            return 50.0
-        # Calculate rolling BB width
-        widths = []
-        for i in range(period * 2, len(closes)):
-            window = closes[i - period : i]
-            sma = np.mean(window)
-            std = np.std(window)
-            width = (2 * std) / sma if sma > 0 else 0
-            widths.append(width)
-        if len(widths) < 2:
-            return 50.0
-        current_width = widths[-1]
-        # Percentile of current width
-        pctile = 100 * np.sum(np.array(widths) <= current_width) / len(widths)
-        return pctile
+        self._symbols_initialized = False
 
     def on_bar(self, bar_data, portfolio):
+        global _RUNTIME_SYMBOLS
         signals = []
         equity = portfolio.equity if portfolio.equity > 0 else portfolio.cash
         self.bar_count += 1
 
-        self.peak_equity = max(self.peak_equity, equity)
-        current_dd = (self.peak_equity - equity) / self.peak_equity
-        dd_scale = 1.0
-        if current_dd > DD_REDUCE_THRESHOLD:
-            dd_scale = max(
-                DD_REDUCE_SCALE, 1.0 - (current_dd - DD_REDUCE_THRESHOLD) * 5
-            )
+        # Track the symbols present in this backtest
+        if not self._symbols_initialized:
+            _RUNTIME_SYMBOLS = sorted(bar_data.keys())
+            self._symbols_initialized = True
+        else:
+            # Accumulate any new symbols seen on later bars
+            new = [s for s in bar_data if s not in _RUNTIME_SYMBOLS]
+            if new:
+                _RUNTIME_SYMBOLS = sorted(_RUNTIME_SYMBOLS + new)
 
-        if "BTC" in bar_data and len(bar_data["BTC"].history) >= LONG_WINDOW + 1:
-            btc_closes = bar_data["BTC"].history["close"].values
-            self.btc_momentum = (
-                btc_closes[-1] - btc_closes[-MED2_WINDOW]
-            ) / btc_closes[-MED2_WINDOW]
-
-        btc_eth_corr = self._calc_correlation(bar_data)
-        high_corr = btc_eth_corr > HIGH_CORR_THRESHOLD
-
-        for symbol in ACTIVE_SYMBOLS:
-            if symbol not in bar_data:
-                continue
-            bd = bar_data[symbol]
+        for symbol, bd in bar_data.items():
             if (
                 len(bd.history)
                 < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5, BB_PERIOD * 3)
@@ -189,7 +87,7 @@ class Strategy:
             if mid <= 0 or np.any(closes <= 0):
                 continue
 
-            realized_vol = self._calc_vol(closes, VOL_LOOKBACK)
+            realized_vol = calc_vol(closes, VOL_LOOKBACK, TARGET_VOL)
             vol_ratio = realized_vol / TARGET_VOL
             dyn_threshold = BASE_THRESHOLD * (0.3 + vol_ratio * 0.7)
             dyn_threshold = max(0.005, min(0.020, dyn_threshold))
@@ -210,42 +108,46 @@ class Strategy:
             rsi_bull = rsi > RSI_BULL
             rsi_bear = rsi < RSI_BEAR
 
-            macd_hist = self._calc_macd(closes)
+            macd_hist = calc_macd(closes, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
             macd_bull = macd_hist > 0
             macd_bear = macd_hist < 0
 
             # BB width: low percentile = compression = pending breakout
-            bb_pctile = self._calc_bb_width_pctile(closes, BB_PERIOD)
+            bb_pctile = calc_bb_width_pctile(closes, BB_PERIOD)
             bb_compressed = bb_pctile < 90  # Below 40th percentile = compressed
 
+            # OBV trend: On-Balance Volume vs its MA
+            vol_data = bd.history["volume"].values
+            vol_bull = False
+            vol_bear = False
+            if len(vol_data) > OBV_MA_PERIOD and len(closes) > OBV_MA_PERIOD:
+                price_changes = np.diff(closes[-(OBV_MA_PERIOD + 1):])
+                recent_vol = vol_data[-(OBV_MA_PERIOD):]
+                signed_vol = np.where(
+                    price_changes > 0, recent_vol,
+                    np.where(price_changes < 0, -recent_vol, 0.0),
+                )
+                obv = np.cumsum(signed_vol)
+                obv_ma = np.mean(obv[-OBV_MA_PERIOD:])
+                vol_bull = obv[-1] > obv_ma
+                vol_bear = obv[-1] < obv_ma
+
             bull_votes = sum(
-                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed]
+                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed, vol_bull]
             )
             bear_votes = sum(
-                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed]
+                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed, vol_bear]
             )
 
-            btc_confirm = True
-            if symbol != "BTC":
-                if bull_votes >= MIN_VOTES and self.btc_momentum < BTC_OPPOSE_THRESHOLD:
-                    btc_confirm = False
-                if (
-                    bear_votes >= MIN_VOTES
-                    and self.btc_momentum > -BTC_OPPOSE_THRESHOLD
-                ):
-                    btc_confirm = False
-
-            bullish = bull_votes >= MIN_VOTES and btc_confirm
-            bearish = bear_votes >= MIN_VOTES and btc_confirm
+            bullish = bull_votes >= MIN_VOTES
+            bearish = bear_votes >= MIN_VOTES
 
             in_cooldown = (
                 self.bar_count - self.exit_bar.get(symbol, -999)
             ) < COOLDOWN_BARS
 
             vol_scale = 1.0
-            weight = SYMBOL_WEIGHTS.get(symbol, 0.33)
-            if high_corr and symbol == "SOL":
-                weight *= 0.5
+            weight = 1.0 / max(len(bar_data), 1)
             strength_scale = 1.0
             size = (
                 equity
@@ -253,14 +155,6 @@ class Strategy:
                 * weight
                 * vol_scale
                 * strength_scale
-                * dd_scale
-            )
-
-            funding_rates = bd.history["funding_rate"].values[-FUNDING_LOOKBACK:]
-            avg_funding = (
-                np.mean(funding_rates)
-                if len(funding_rates) >= FUNDING_LOOKBACK
-                else 0.0
             )
 
             current_pos = portfolio.positions.get(symbol, 0.0)
@@ -268,32 +162,12 @@ class Strategy:
 
             if current_pos == 0:
                 if not in_cooldown:
-                    funding_mult = 1.0
                     if bullish:
-                        if avg_funding < 0:
-                            funding_mult = 1.0 + FUNDING_BOOST
-                        target = size * funding_mult
-                        self.pyramided[symbol] = False
+                        target = size
                     elif bearish:
-                        if avg_funding > 0:
-                            funding_mult = 1.0 + FUNDING_BOOST
-                        target = -size * funding_mult
-                        self.pyramided[symbol] = False
+                        target = -size
             else:
-                if symbol in self.entry_prices and not self.pyramided.get(symbol, True):
-                    entry = self.entry_prices[symbol]
-                    pnl = (mid - entry) / entry
-                    if current_pos < 0:
-                        pnl = -pnl
-                    if pnl > PYRAMID_THRESHOLD:
-                        if current_pos > 0 and bullish:
-                            target = current_pos + size * PYRAMID_SIZE
-                            self.pyramided[symbol] = True
-                        elif current_pos < 0 and bearish:
-                            target = current_pos - size * PYRAMID_SIZE
-                            self.pyramided[symbol] = True
-
-                atr = self._calc_atr(bd.history, ATR_LOOKBACK)
+                atr = calc_atr(bd.history, ATR_LOOKBACK)
                 if atr is None:
                     atr = self.atr_at_entry.get(symbol, mid * 0.02)
 
@@ -335,13 +209,12 @@ class Strategy:
                     self.entry_prices[symbol] = mid
                     self.peak_prices[symbol] = mid
                     self.atr_at_entry[symbol] = (
-                        self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
+                        calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
                     )
                 elif target == 0:
                     self.entry_prices.pop(symbol, None)
                     self.peak_prices.pop(symbol, None)
                     self.atr_at_entry.pop(symbol, None)
-                    self.pyramided.pop(symbol, None)
                     self.exit_bar[symbol] = self.bar_count
                 elif (target > 0 and current_pos < 0) or (
                     target < 0 and current_pos > 0
@@ -349,9 +222,8 @@ class Strategy:
                     self.entry_prices[symbol] = mid
                     self.peak_prices[symbol] = mid
                     self.atr_at_entry[symbol] = (
-                        self._calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
+                        calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
                     )
-                    self.pyramided[symbol] = False
 
         return signals
 
@@ -360,20 +232,19 @@ ACTIVE_PARAMS = (
     "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
     "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
     "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
-    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK", "FUNDING_BOOST",
+    "MACD_SIGNAL", "BB_PERIOD",
     "BASE_POSITION_PCT", "VOL_LOOKBACK", "TARGET_VOL", "ATR_LOOKBACK",
     "ATR_STOP_MULT", "TAKE_PROFIT_PCT", "BASE_THRESHOLD",
-    "BTC_OPPOSE_THRESHOLD", "PYRAMID_THRESHOLD", "PYRAMID_SIZE",
-    "CORR_LOOKBACK", "HIGH_CORR_THRESHOLD", "DD_REDUCE_THRESHOLD",
-    "DD_REDUCE_SCALE", "COOLDOWN_BARS", "MIN_VOTES",
+    "COOLDOWN_BARS", "MIN_VOTES", "OBV_MA_PERIOD",
 )
 
 INT_PARAMS = {
     "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
     "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
     "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
-    "MACD_SIGNAL", "BB_PERIOD", "FUNDING_LOOKBACK",
+    "MACD_SIGNAL", "BB_PERIOD",
     "VOL_LOOKBACK", "ATR_LOOKBACK", "COOLDOWN_BARS", "MIN_VOTES",
+    "OBV_MA_PERIOD",
 }
 
 
@@ -408,12 +279,6 @@ def save_experiment_to_db(
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
 
-        if is_best:
-            cur.execute(
-                "UPDATE param_snapshots SET is_active = FALSE "
-                "WHERE is_active = TRUE AND period = '1h'"
-            )
-
         param_cols = ", ".join(ACTIVE_PARAMS)
         all_cols = (
             "run_date, sweep_name, period, symbol, is_active, is_best, "
@@ -433,9 +298,8 @@ def save_experiment_to_db(
             datetime.now(timezone.utc).isoformat(),
             "autoresearch",
             "1h",
-            "ALL",
-            is_best,
-            is_best,
+            ",".join(_RUNTIME_SYMBOLS),
+            False,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -476,7 +340,7 @@ def load_params_from_db() -> bool:
             with conn.cursor() as cur:
                 select_cols = ", ".join(ACTIVE_PARAMS)
                 cur.execute(
-                    f"SELECT {select_cols} "
+                    f"SELECT symbol, {select_cols} "
                     "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
                     "ORDER BY run_date DESC LIMIT 1"
                 )
@@ -484,16 +348,24 @@ def load_params_from_db() -> bool:
                 if not row:
                     return False
 
-                for name, val in zip(ACTIVE_PARAMS, row):
+                symbol_str = row[0]
+                for name, val in zip(ACTIVE_PARAMS, row[1:]):
                     if name in INT_PARAMS:
                         globals()[name] = int(val)
                     else:
                         globals()[name] = float(val)
 
-                print(f"Loaded 1h params from DB")
+                if symbol_str and symbol_str != "ALL":
+                    loaded_symbols = [s.strip() for s in symbol_str.split(",") if s.strip()]
+                    if loaded_symbols:
+                        globals()["ACTIVE_SYMBOLS"] = loaded_symbols
+
+                print(f"Loaded 1h params from DB (symbols: {symbol_str})")
                 return True
     except Exception:
         return False
 
 
-load_params_from_db()
+import os as _os
+if _os.environ.get("LOAD_PARAMS_FROM_DB", "").lower() in ("1", "true", "yes"):
+    load_params_from_db()

@@ -26,7 +26,6 @@ if str(_REPO_ROOT) not in sys.path:
 from live_trading_bot.config import get_settings
 from live_trading_bot.config.settings import Settings
 from live_trading_bot.exchange import create_exchange, Exchange
-from live_trading_bot.exchange.order_manager import OrderManager
 from live_trading_bot.exchange.types import AccountState, Candle
 from live_trading_bot.data.streamer import DataStreamer
 from live_trading_bot.adapter.ensemble import EnsembleStrategy
@@ -51,7 +50,6 @@ class TradingBot:
         self.settings = settings or get_settings()
 
         self.client: Optional[Exchange] = None
-        self.order_manager: Optional[OrderManager] = None
         self.data_streamer: Optional[DataStreamer] = None
         self.strategy: Optional[EnsembleStrategy] = None
         self.risk_controller: Optional[RiskController] = None
@@ -72,13 +70,16 @@ class TradingBot:
         self._last_summary_time: Optional[datetime] = None
         self._bar_count: int = 0
         self._last_heartbeat: float = 0
+        self._last_processed_bar_ts: int = 0
 
     async def initialize(self):
         log_dir = Path(self.settings.LOG_PATH).parent
         log_dir.mkdir(parents=True, exist_ok=True)
 
         setup_logger(
-            log_level="INFO", log_path=self.settings.LOG_PATH, json_format=True
+            log_level=self.settings.LOG_LEVEL,
+            log_path=self.settings.LOG_PATH,
+            json_format=True,
         )
 
         logger.info(
@@ -93,8 +94,6 @@ class TradingBot:
         await self.db.connect()
 
         self.client = create_exchange()
-
-        self.order_manager = OrderManager(self.client)
 
         self.strategy = EnsembleStrategy()
 
@@ -112,6 +111,8 @@ class TradingBot:
             client=self.client,
             settings=self.settings,
             symbols=self.settings.TRADING_PAIRS,
+            risk_controller=self.risk_controller,
+            position_limiter=self.position_limiter,
         )
         self.stop_manager = StopManager(self.client, self.settings)
         self.watchdog = Watchdog(self.settings, self.client, self.alerter)
@@ -127,9 +128,7 @@ class TradingBot:
         self.data_streamer = DataStreamer(
             symbols=self.settings.TRADING_PAIRS,
             on_bar_callback=self._on_bar,
-            on_tick_callback=self._on_tick
-            if self.settings.TICK_EXECUTION_ENABLED
-            else None,
+            on_tick_callback=self._on_tick,
         )
 
         account_state = await self.client.get_account_state()
@@ -183,9 +182,16 @@ class TradingBot:
         return positions_usd
 
     async def _on_bar(self, symbol: str, candle: Candle):
-        """Called once per interval by DataStreamer after all symbols' bars are batched."""
+        """On bar close: run strategy → set direction in signal_state → update execution engine equity."""
         if not self._running:
             return
+
+        # Dedup: with per-symbol callbacks, all symbols fire within the same
+        # bar interval (same timestamp). Only process once per unique bar.
+        bar_ts = getattr(candle, "timestamp", 0)
+        if bar_ts <= self._last_processed_bar_ts:
+            return
+        self._last_processed_bar_ts = bar_ts
 
         self._bar_count += 1
 
@@ -206,8 +212,173 @@ class TradingBot:
 
         try:
             assert self.client is not None
+            assert self.data_streamer is not None
+            assert self.strategy is not None
+            assert self.db is not None
             assert self.alerter is not None
-            await self._process_bar(triggered_by=symbol)
+            assert self.metrics is not None
+            assert self.signal_state is not None
+            assert self.execution_engine is not None
+
+            account_state = await self.client.get_account_state()
+
+            prices = await self.client.get_all_mid_prices()
+            for sym in self.settings.TRADING_PAIRS:
+                if sym in prices:
+                    self._current_prices[sym] = prices[sym]
+
+            # Get all histories from streamer
+            histories = self.data_streamer.get_all_histories()
+
+            # Sync positions from exchange
+            for sym in self.settings.TRADING_PAIRS:
+                self._current_positions.pop(sym, None)
+            for sym, pos in account_state.positions.items():
+                self._current_positions[sym] = (
+                    pos.size if pos.side.value == "long" else -pos.size
+                )
+
+            if self.risk_controller:
+                daily_check = await self.risk_controller.check_daily_loss_limit(account_state)
+                if not daily_check.allowed:
+                    logger.warning(
+                        "Bar skipped — daily loss limit",
+                        extra={"reason": daily_check.reason},
+                    )
+                    self.execution_engine.set_equity(account_state.total_equity)
+                    await self.execution_engine.sync_positions(
+                        account_state, self._current_prices
+                    )
+                    return
+
+            # Run strategy
+            signals = self.strategy.on_bar(
+                histories=histories,
+                account_state=account_state,
+                current_prices=self._current_prices,
+            )
+
+            if not signals:
+                logger.info("No signals generated")
+                self.execution_engine.set_equity(account_state.total_equity)
+                await self.execution_engine.sync_positions(
+                    account_state, self._current_prices
+                )
+                return
+
+            logger.info(
+                "Generated signals",
+                extra={
+                    "triggered_by": symbol,
+                    "count": len(signals),
+                    "symbols": [s.symbol for s in signals],
+                },
+            )
+
+            # Extract direction + momentum → signal_state
+            for sig in signals:
+                direction = (
+                    1 if sig.target_position > 0
+                    else -1 if sig.target_position < 0
+                    else 0
+                )
+
+                # momentum = MED_WINDOW-bar return
+                candles = histories.get(sig.symbol, [])
+                momentum = 0.0
+                if candles and len(candles) > self.settings.MED_WINDOW:
+                    closes = [c.close for c in candles]
+                    ref = closes[-self.settings.MED_WINDOW]
+                    momentum = (closes[-1] - ref) / max(ref, 1e-10)
+
+                atr = self._get_current_atr(sig.symbol)
+
+                entry_price = self._current_prices.get(sig.symbol, 0)
+
+                self.signal_state.set_direction(
+                    symbol=sig.symbol,
+                    direction=direction,
+                    momentum=momentum,
+                    atr=atr,
+                    entry_price=entry_price,
+                    bar_count=self._bar_count,
+                )
+
+                logger.debug(
+                    "signal processed",
+                    extra={
+                        "symbol": sig.symbol,
+                        "direction": direction,
+                        "target_position": sig.target_position,
+                        "momentum": round(momentum, 6),
+                        "atr": round(atr, 4),
+                        "entry_price": entry_price,
+                        "bar_count": self._bar_count,
+                    },
+                )
+
+                self.execution_engine.clear_pending_reversal(sig.symbol)
+
+            positions_usd = self._positions_to_usd()
+            for sig in signals:
+                await self.db.insert_signal(
+                    SignalRecord(
+                        id=None,
+                        timestamp=datetime.now(timezone.utc),
+                        symbol=sig.symbol,
+                        signal_type="target_position",
+                        target_position=sig.target_position,
+                        current_position=positions_usd.get(sig.symbol, 0),
+                        executed=False,
+                    )
+                )
+
+            self.execution_engine.set_equity(account_state.total_equity)
+
+            await self.execution_engine.sync_positions(
+                account_state, self._current_prices
+            )
+
+            # Log position state after bar
+            pos_state = {
+                s: {
+                    "direction": (
+                        "long"
+                        if self.execution_engine._last_executed_direction.get(s, 0) > 0
+                        else "short"
+                        if self.execution_engine._last_executed_direction.get(s, 0) < 0
+                        else "flat"
+                    ),
+                    "coins": round(
+                        self.execution_engine._position_sizes.get(s, 0.0), 8
+                    ),
+                    "entry": round(
+                        self.execution_engine._entry_prices.get(s, 0.0), 2
+                    ),
+                }
+                for s in self.settings.TRADING_PAIRS
+                if self.execution_engine._position_sizes.get(s, 0.0) > 0
+            }
+            if pos_state:
+                logger.info("Position state after bar", extra={"positions": pos_state})
+            else:
+                logger.info("No open positions after bar")
+
+            if self.stop_manager:
+                atrs = {}
+                for sym in self.settings.TRADING_PAIRS:
+                    atrs[sym] = self._get_current_atr(sym)
+                await self.stop_manager.refresh_stops(account_state.positions, atrs)
+
+            self.metrics.update(
+                equity=account_state.total_equity,
+                cash=account_state.available_balance,
+                positions=self._current_positions,
+                unrealized_pnl=account_state.unrealized_pnl,
+            )
+
+            await self._check_hourly_summary(account_state)
+
         except Exception as e:
             logger.error(
                 "Error processing bar", extra={"symbol": symbol, "error": str(e)}
@@ -225,18 +396,6 @@ class TradingBot:
             order = await self.execution_engine.on_tick(symbol, price)
             if order and order.status.value in ("filled", "partially_filled"):
                 await self._record_execution_order(order)
-                logger.info(
-                    "Position after tick fill",
-                    extra={
-                        "symbol": symbol,
-                        "side": order.side.value,
-                        "filled_size": round(order.filled_size, 8),
-                        "price": order.avg_fill_price,
-                        "tracked_size": round(
-                            self.execution_engine._position_sizes.get(symbol, 0.0), 8
-                        ),
-                    },
-                )
         except Exception as e:
             logger.error(
                 "Tick execution error", extra={"symbol": symbol, "error": str(e)}
@@ -249,10 +408,7 @@ class TradingBot:
 
         pnl = None
         if self.execution_engine:
-            entry = self.execution_engine._entry_prices.get(order.symbol, 0)
-            direction = self.execution_engine._last_executed_direction.get(
-                order.symbol, 0
-            )
+            entry, direction = self.execution_engine.consume_close_info(order.symbol)
             if entry > 0 and direction != 0:
                 if direction > 0 and order.side.value == "sell":  # closing long
                     pnl = (order.avg_fill_price - entry) * order.filled_size
@@ -293,231 +449,10 @@ class TradingBot:
         if self.stop_manager:
             await self.stop_manager.cancel_stop(symbol)
 
-    async def _process_bar(self, triggered_by: str = ""):
-        assert self.client is not None
-        assert self.data_streamer is not None
-        assert self.strategy is not None
-        assert self.risk_controller is not None
-        assert self.position_limiter is not None
-        assert self.order_manager is not None
-        assert self.db is not None
-        assert self.alerter is not None
-        assert self.metrics is not None
-
-        account_state = await self.client.get_account_state()
-
-        prices = await self.client.get_all_mid_prices()
-        for symbol in self.settings.TRADING_PAIRS:
-            if symbol in prices:
-                self._current_prices[symbol] = prices[symbol]
-
-        histories = self.data_streamer.get_all_histories()
-
-        # Sync positions from exchange (DryExchange returns simulated state)
-        for symbol in self.settings.TRADING_PAIRS:
-            self._current_positions.pop(symbol, None)
-        for symbol, pos in account_state.positions.items():
-            self._current_positions[symbol] = (
-                pos.size if pos.side.value == "long" else -pos.size
-            )
-
-        positions_usd = self._positions_to_usd()
-
-        signals = self.strategy.on_bar(
-            histories=histories,
-            account_state=account_state,
-            current_prices=self._current_prices,
-        )
-
-        if not signals:
-            logger.info("No signals generated")
-            return
-
-        logger.info(
-            "Generated signals",
-            extra={
-                "triggered_by": triggered_by,
-                "count": len(signals),
-                "symbols": [s.symbol for s in signals],
-            },
-        )
-
-        for sig in signals:
-            await self.db.insert_signal(
-                SignalRecord(
-                    id=None,
-                    timestamp=datetime.now(timezone.utc),
-                    symbol=sig.symbol,
-                    signal_type="target_position",
-                    target_position=sig.target_position,
-                    current_position=positions_usd.get(sig.symbol, 0),
-                    executed=False,
-                )
-            )
-
-        risk_checked_signals = await self.risk_controller.check_all(
-            signals=signals,
-            account_state=account_state,
-            current_prices=self._current_prices,
-            current_positions=positions_usd,
-        )
-
-        if not risk_checked_signals:
-            logger.info(
-                "All signals rejected by risk controller",
-                extra={
-                    "original_count": len(signals),
-                    "symbols": [s.symbol for s in signals],
-                },
-            )
-            return
-
-        limited_signals = self.position_limiter.apply_limits(
-            signals=risk_checked_signals,
-            account_state=account_state,
-            current_positions=positions_usd,
-        )
-
-        if not limited_signals:
-            logger.info(
-                "All signals rejected by position limiter",
-                extra={
-                    "pre_limit_count": len(risk_checked_signals),
-                    "symbols": [s.symbol for s in risk_checked_signals],
-                },
-            )
-            return
-
-        if self.settings.TICK_EXECUTION_ENABLED and self.execution_engine:
-            assert self.signal_state is not None
-            for signal in limited_signals:
-                await self.db.insert_signal(
-                    SignalRecord(
-                        id=None,
-                        timestamp=datetime.now(timezone.utc),
-                        symbol=signal.symbol,
-                        signal_type="target_position",
-                        target_position=signal.target_position,
-                        current_position=positions_usd.get(signal.symbol, 0),
-                        executed=False,
-                    )
-                )
-
-                self.signal_state.update_signal(
-                    symbol=signal.symbol,
-                    target_position=signal.target_position,
-                    atr=self._get_current_atr(signal.symbol),
-                    entry_price=self._current_prices.get(signal.symbol, 0),
-                    timestamp=datetime.now(timezone.utc),
-                )
-
-            await self.execution_engine.sync_positions(
-                account_state, self._current_prices
-            )
-
-            pos_state = {
-                s: {
-                    "direction": "long"
-                    if self.execution_engine._last_executed_direction.get(s, 0) > 0
-                    else "short"
-                    if self.execution_engine._last_executed_direction.get(s, 0) < 0
-                    else "flat",
-                    "coins": round(
-                        self.execution_engine._position_sizes.get(s, 0.0), 8
-                    ),
-                    "entry": round(self.execution_engine._entry_prices.get(s, 0.0), 2),
-                }
-                for s in self.settings.TRADING_PAIRS
-                if self.execution_engine._position_sizes.get(s, 0.0) > 0
-            }
-            if pos_state:
-                logger.info("Position state after bar", extra={"positions": pos_state})
-            else:
-                logger.info("No open positions after bar")
-
-            if self.stop_manager:
-                atrs = {}
-                for symbol in self.settings.TRADING_PAIRS:
-                    atrs[symbol] = self._get_current_atr(symbol)
-                await self.stop_manager.refresh_stops(account_state.positions, atrs)
-        else:
-            orders = await self.order_manager.execute_signals(
-                signals=limited_signals,
-                positions=positions_usd,
-                prices=self._current_prices,
-            )
-
-            for order in orders:
-                pnl = None
-                current_pos = positions_usd.get(order.symbol, 0)
-
-                if current_pos > 0 and order.side.value == "sell":
-                    entry = account_state.positions.get(order.symbol)
-                    entry_px = entry.entry_price if entry else order.avg_fill_price
-                    pnl = (order.avg_fill_price - entry_px) * order.filled_size
-                elif current_pos < 0 and order.side.value == "buy":
-                    entry = account_state.positions.get(order.symbol)
-                    entry_px = entry.entry_price if entry else order.avg_fill_price
-                    pnl = (entry_px - order.avg_fill_price) * order.filled_size
-
-                await self.db.insert_trade(
-                    Trade(
-                        id=None,
-                        timestamp=datetime.now(timezone.utc),
-                        symbol=order.symbol,
-                        side=order.side.value,
-                        size=order.filled_size,
-                        price=order.avg_fill_price,
-                        fee=order.filled_size * 0.0005,
-                        pnl=pnl,
-                        order_id=order.id,
-                    )
-                )
-
-                self.metrics.record_trade(
-                    symbol=order.symbol,
-                    side=order.side.value,
-                    size=order.filled_size,
-                    price=order.avg_fill_price,
-                    pnl=pnl,
-                )
-
-                await self.alerter.alert_trade(
-                    symbol=order.symbol,
-                    side=order.side.value,
-                    size=order.filled_size,
-                    price=order.avg_fill_price,
-                    pnl=pnl,
-                )
-
-        account_state = await self.client.get_account_state()
-
-        # Re-sync positions after execution
-        for symbol in self.settings.TRADING_PAIRS:
-            self._current_positions.pop(symbol, None)
-        for symbol, pos in account_state.positions.items():
-            self._current_positions[symbol] = (
-                pos.size if pos.side.value == "long" else -pos.size
-            )
-
-        self.metrics.update(
-            equity=account_state.total_equity,
-            cash=account_state.available_balance,
-            positions=self._current_positions,
-            unrealized_pnl=account_state.unrealized_pnl,
-        )
-
-        await self._check_hourly_summary(account_state)
-
     def _get_current_atr(self, symbol: str) -> float:
         if not self.strategy:
             return 0.0
-        strategy = (
-            self.strategy._strategy if hasattr(self.strategy, "_strategy") else None
-        )
-        if strategy and hasattr(strategy, "atr_at_entry"):
-            return strategy.atr_at_entry.get(symbol, 0.0)
-        return 0.0
+        return self.strategy.get_atr_at_entry(symbol)
 
     async def _check_hourly_summary(self, account_state: AccountState):
         assert self.metrics is not None
