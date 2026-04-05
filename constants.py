@@ -19,13 +19,16 @@ ALL_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
 # Per-interval active symbol sets (each is a subset of ALL_SYMBOLS).
 # Used by strategies, data pipeline, and benchmarks.
 INTERVAL_SYMBOLS: dict[str, list[str]] = {
-    "1h": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
-    "15m": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
-    "5m": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
-    "1m": ["BTC", "ETH", "SOL", "XRP", "HYPE"],
+    "1h": ALL_SYMBOLS,
+    "15m": ALL_SYMBOLS,
+    "5m": ALL_SYMBOLS,
+    "1m": ALL_SYMBOLS,
 }
 
-BENCHMARK_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE", "ALGO", "LIT", "MON", "NEAR", "TAO", "XPL", "ZEC"]
+BENCHMARK_SYMBOLS = [
+    "BTC", "ETH", "SOL", "XRP", "HYPE",
+    "ALGO", "LIT", "MON", "NEAR", "TAO", "XPL", "ZEC",
+]
 
 def make_equal_weights(
     symbols: list[str] | None = None,
