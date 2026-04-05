@@ -5,43 +5,56 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
 
 import psycopg2
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+if "SUPABASE_DB_URL" not in os.environ:
+    env_file = REPO_ROOT / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 RESULTS_FILE = REPO_ROOT / "results.tsv"
 
+ACTIVE_PARAMS = (
+    "SHORT_WINDOW", "MED_WINDOW", "MED2_WINDOW", "LONG_WINDOW",
+    "EMA_FAST", "EMA_SLOW", "RSI_PERIOD", "RSI_BULL", "RSI_BEAR",
+    "RSI_OVERBOUGHT", "RSI_OVERSOLD", "MACD_FAST", "MACD_SLOW",
+    "MACD_SIGNAL", "BB_PERIOD",
+    "BASE_POSITION_PCT", "VOL_LOOKBACK", "TARGET_VOL", "ATR_LOOKBACK",
+    "ATR_STOP_MULT", "TAKE_PROFIT_PCT", "BASE_THRESHOLD",
+    "COOLDOWN_BARS", "MIN_VOTES", "OBV_MA_PERIOD",
+)
 
-def extract_params_from_commit(sha: str) -> tuple[dict[str, float], list[str]]:
+
+def extract_params_from_commit(sha: str) -> dict[str, float]:
     result = subprocess.run(
         ["git", "show", f"{sha}:strategy.py"],
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
-        return {}, []
+        return {}
 
     code = result.stdout
-    m = re.search(r"ACTIVE_PARAMS\s*=\s*\(([^)]+)\)", code, re.DOTALL)
-    if not m:
-        return {}, []
-
-    active_params = [
-        p.strip().strip('"').strip("'")
-        for p in m.group(1).split(",")
-        if p.strip() and not p.strip().startswith("#")
-    ]
-
     params = {}
-    for param in active_params:
+    for param in ACTIVE_PARAMS:
         pm = re.search(rf"^{param}\s*=\s*([\d.]+)", code, re.MULTILINE)
         if pm:
             params[param] = float(pm.group(1))
         else:
             params[param] = 0.0
-    return params, active_params
+    return params
 
 
 def parse_results() -> list[dict]:
@@ -71,72 +84,80 @@ def main():
     results = parse_results()
     print(f"Found {len(results)} experiments in results.tsv")
 
+    now = datetime.now(timezone.utc).isoformat()
+
     conn = psycopg2.connect(db_url)
     try:
         cur = conn.cursor()
 
-        cur.execute("DELETE FROM param_snapshots WHERE run_date >= '2026-04-01'")
-        deleted = cur.rowcount
-        conn.commit()
-        print(f"Deleted {deleted} existing rows from today")
-
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'param_snapshots' ORDER BY ordinal_position"
-        )
-        db_columns = {row[0] for row in cur.fetchall()}
+        # DB schema columns in order (excluding id, previous_snapshot_id, and unused param columns)
+        insert_cols = [
+            "run_date", "sweep_name", "period",
+            "sharpe", "total_return_pct", "max_drawdown_pct",
+            "profit_factor", "win_rate_pct", "num_trades", "ret_dd_ratio",
+            "is_best",
+        ]
+        # Param columns that exist in DB
+        param_col_names = [p.lower() for p in ACTIVE_PARAMS]
+        all_insert_cols = insert_cols + param_col_names + [
+            "symbol", "is_active", "description", "score", "status",
+        ]
+        placeholders = ", ".join(["%s"] * len(all_insert_cols))
+        col_str = ", ".join(all_insert_cols)
 
         inserted = 0
-        for row in results:
+        skipped = 0
+        for i, row in enumerate(results, 1):
             sha = row["commit"]
-            params, commit_active_params = extract_params_from_commit(sha)
-            if not params:
-                print(f"  SKIP {sha}: could not extract params", file=sys.stderr)
+
+            cur.execute(
+                "SELECT id FROM param_snapshots "
+                "WHERE description = %s AND score = %s AND status = %s "
+                "LIMIT 1",
+                (row["description"], row["score"], row["status"]),
+            )
+            if cur.fetchone():
+                skipped += 1
                 continue
 
-            filtered_params = [
-                p for p in commit_active_params if p.lower() in db_columns
-            ]
-            param_cols = ", ".join(p.lower() for p in filtered_params)
-            all_cols = (
-                "run_date, sweep_name, period, "
-                "sharpe, total_return_pct, max_drawdown_pct, "
-                "profit_factor, win_rate_pct, num_trades, ret_dd_ratio, "
-                "is_best, previous_snapshot_id, "
-                + param_cols
-                + ", symbol, is_active, description, score, status"
-            )
-            num_vals = 12 + len(filtered_params) + 2 + 3
-            placeholders = ", ".join(["%s"] * num_vals)
+            params = extract_params_from_commit(sha)
+            if not params:
+                print(f"  [{i}/{len(results)}] SKIP {sha[:7]}: no strategy.py", file=sys.stderr)
+                skipped += 1
+                continue
 
             ret_dd_ratio = row["score"] / row["max_dd"] if row["max_dd"] > 0 else 0.0
 
             values = [
-                "2026-04-02T00:00:00+00:00",
+                now,
                 "autoresearch",
                 "1h",
                 row["sharpe"],
-                row["score"],
+                0.0,
                 row["max_dd"],
-                0.0, 0.0, 0,
+                0.0,
+                0.0,
+                0,
                 ret_dd_ratio,
                 False,
-                None,
             ]
-            for c in filtered_params:
-                values.append(params[c])
+            for p in ACTIVE_PARAMS:
+                values.append(params.get(p, 0.0))
             values.extend(["ALL", False, row["description"], row["score"], row["status"]])
 
+            assert len(values) == len(all_insert_cols), \
+                f"Mismatch: {len(values)} values vs {len(all_insert_cols)} cols"
+
             cur.execute(
-                f"INSERT INTO param_snapshots ({all_cols}) VALUES ({placeholders})",
+                f"INSERT INTO param_snapshots ({col_str}) VALUES ({placeholders})",
                 values,
             )
             inserted += 1
-            tag = "PASS" if row["status"] == "PASS" else "FAIL"
-            print(f"  {inserted:3d}. {sha[:8]} score={row['score']:.2f} {tag} {row['description']}")
+            tag = "PASS" if row["status"] == "PASS" else "   "
+            print(f"  [{i}/{len(results)}] {tag} {sha[:7]} score={row['score']:.3f} {row['description'][:60]}")
 
         conn.commit()
-        print(f"\nInserted {inserted}/{len(results)} experiments")
+        print(f"\nDone: {inserted} inserted, {skipped} skipped, {len(results) - inserted - skipped} failed")
     finally:
         conn.close()
 
