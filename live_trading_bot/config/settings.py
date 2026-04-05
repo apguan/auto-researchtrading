@@ -28,12 +28,11 @@ def _discover_usdc_cross_margin_perps() -> list[str]:
         return list(ALL_SYMBOLS)
 
 
-def _load_active_db_params() -> dict[str, int | float]:
+def _load_active_db_params() -> dict[str, int | float | list[str]]:
     """Load the active 1h params from param_snapshots (is_active=TRUE).
 
-    Returns a dict of param_name -> value, or empty dict on any failure.
-    This is the single DB query that feeds both the Settings layer AND
-    strategy.py globals — no split-brain.
+    Returns a dict of param_name -> value, plus 'TRADING_PAIRS' from
+    the snapshot's symbol column. Empty dict on any failure.
     """
     db_url = os.environ.get("SUPABASE_DB_URL", "")
     if not db_url:
@@ -46,7 +45,7 @@ def _load_active_db_params() -> dict[str, int | float]:
             with conn.cursor() as cur:
                 select_cols = ", ".join(PARAM_COLUMNS)
                 cur.execute(
-                    f"SELECT {select_cols} "
+                    f"SELECT symbol, {select_cols} "
                     "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
                     "ORDER BY run_date DESC LIMIT 1"
                 )
@@ -54,18 +53,24 @@ def _load_active_db_params() -> dict[str, int | float]:
                 if not row:
                     return {}
 
-                params: dict[str, int | float] = {}
-                for name, val in zip(PARAM_COLUMNS, row):
+                symbol_str = row[0]
+                params: dict[str, int | float | list[str]] = {}
+                for name, val in zip(PARAM_COLUMNS, row[1:]):
                     if name in _INT_PARAMS:
                         params[name] = int(val)
                     else:
                         params[name] = float(val)
 
+                if symbol_str and symbol_str != "ALL":
+                    symbols = [s.strip() for s in symbol_str.split(",") if s.strip()]
+                    if symbols:
+                        params["TRADING_PAIRS"] = symbols
+
                 from live_trading_bot.monitoring.logger import get_logger
 
                 get_logger(__name__).info(
                     "Loaded strategy params from DB",
-                    extra={"param_count": len(params)},
+                    extra={"param_count": len(params), "symbols": symbol_str},
                 )
                 return params
     except Exception:
@@ -270,9 +275,14 @@ def _apply_db_params(settings: Settings) -> None:
     if not db_params:
         return
 
+    trading_pairs = db_params.pop("TRADING_PAIRS", None)
     for name, val in db_params.items():
         if hasattr(settings, name):
             setattr(settings, name, val)
+
+    if trading_pairs:
+        settings.TRADING_PAIRS = trading_pairs
+        settings.SYMBOL_WEIGHTS = make_equal_weights(trading_pairs)
 
 
 def get_settings() -> Settings:
