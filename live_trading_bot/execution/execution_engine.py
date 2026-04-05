@@ -92,6 +92,8 @@ class ExecutionEngine:
             return None
         if price <= 0:
             return None
+        if symbol in self._closing:
+            return None
 
         self._current_prices[symbol] = price
         self.signal_state.update_peak_trough(symbol, price)
@@ -490,6 +492,8 @@ class ExecutionEngine:
         )
 
         self._closing.add(symbol)
+        # Set cooldown BEFORE the await so concurrent ticks are blocked
+        self._last_execution_attempt[symbol] = time.time() * 1000
 
         try:
             order = await self.client.place_order(
@@ -541,7 +545,6 @@ class ExecutionEngine:
             self._entry_prices[symbol] = 0.0
             self._last_executed_direction[symbol] = 0
 
-        self._last_execution_attempt[symbol] = time.time() * 1000
         return order
 
     async def sync_positions(

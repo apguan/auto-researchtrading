@@ -115,8 +115,21 @@ class DryExchange:
         reduce_only: bool = False,
     ) -> Order:
         fill_price = price or await self.get_mid_price(symbol)
-        self._apply_fill(symbol, side, size, fill_price, reduce_only)
+        applied = self._apply_fill(symbol, side, size, fill_price, reduce_only)
         self.ledger.save()
+
+        if not applied:
+            return Order(
+                id=f"dry-{self._get_nonce()}",
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                size=size,
+                price=fill_price,
+                status=OrderStatus.REJECTED,
+                filled_size=0.0,
+                avg_fill_price=fill_price,
+            )
 
         return Order(
             id=f"dry-{self._get_nonce()}",
@@ -158,14 +171,14 @@ class DryExchange:
         size: float,
         fill_price: float,
         reduce_only: bool,
-    ) -> None:
+    ) -> bool:
         pos = self.ledger.positions.get(symbol)
         is_buy = side == OrderSide.BUY
         now = datetime.now(timezone.utc).isoformat()
 
         if pos is None:
             if reduce_only:
-                return
+                return False
             self.ledger.open_position(symbol, is_buy, size, fill_price)
             self.ledger.record_transaction({
                 "timestamp": now,
@@ -177,7 +190,7 @@ class DryExchange:
                 "pnl": 0.0,
                 "realized_pnl_cumulative": self.ledger.realized_pnl,
             })
-            return
+            return True
 
         is_closing = (pos.is_long and not is_buy) or (
             not pos.is_long and is_buy
@@ -246,6 +259,8 @@ class DryExchange:
                 "pnl": 0.0,
                 "realized_pnl_cumulative": self.ledger.realized_pnl,
             })
+
+        return True
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         return True

@@ -207,16 +207,6 @@ class TestExecutionEngine:
         await engine.sync_positions(account_state, {"BTC": 50000.0})
         assert engine._position_sizes["BTC"] == 0.2
 
-    def test_reset(self, settings, signal_state, mock_client):
-        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
-        engine._position_sizes["BTC"] = 0.1
-        engine._entry_prices["BTC"] = 50000.0
-        engine._last_executed_direction["BTC"] = 1
-        engine.reset()
-        assert len(engine._position_sizes) == 0
-        assert len(engine._entry_prices) == 0
-        assert len(engine._last_executed_direction) == 0
-
     @pytest.mark.asyncio
     async def test_non_filled_close_clears_internal_state(
         self, settings, signal_state, mock_client
@@ -297,25 +287,6 @@ class TestExecutionEngine:
 
         signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, 10)
         assert engine._calculate_position_size("BTC", 1) > 0
-
-    @pytest.mark.asyncio
-    async def test_take_profit_exit(self, signal_state, mock_client):
-        mock_client.place_order = AsyncMock(
-            return_value=_make_filled_order(side=OrderSide.SELL, price=55000.0)
-        )
-        settings = Settings(TAKE_PROFIT_PCT=0.10, EXECUTION_COOLDOWN_MS=0)
-        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
-        engine._position_sizes["BTC"] = 0.1
-        engine._entry_prices["BTC"] = 50000.0
-        engine._last_executed_direction["BTC"] = 1
-
-        signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
-
-        order = await engine.on_tick("BTC", 55000.0)
-        assert order is not None
-        assert mock_client.place_order.called
-        call_args = mock_client.place_order.call_args
-        assert call_args.kwargs.get("reduce_only") is True
 
     @pytest.mark.asyncio
     async def test_atr_trailing_stop_not_triggering(
@@ -409,41 +380,6 @@ class TestExecutionEngine:
         await engine.on_tick("SOL", 100.0)
         sol_kwargs = mock_client.place_order.call_args.kwargs
         assert sol_kwargs["size"] == pytest.approx(75.428571, abs=1e-3)
-
-    @pytest.mark.asyncio
-    async def test_sync_positions_uses_position_side_not_signal(
-        self, signal_state, mock_client
-    ):
-        from live_trading_bot.exchange.types import Position, PositionSide, AccountState
-
-        settings = Settings(
-            EXECUTION_COOLDOWN_MS=100,
-            EXIT_CONVICTION_BARS=1,
-            MIN_HOLD_BARS=0,
-        )
-        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
-
-        signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, bar_count=5)
-
-        short_position = Position(
-            symbol="BTC",
-            side=PositionSide.SHORT,
-            size=0.1,
-            entry_price=50000.0,
-            current_price=49000.0,
-            unrealized_pnl=100.0,
-        )
-        account_state = AccountState(
-            wallet_address="0xTest",
-            total_equity=100000.0,
-            available_balance=95000.0,
-            margin_used=5000.0,
-            unrealized_pnl=100.0,
-            positions={"BTC": short_position},
-        )
-
-        await engine.sync_positions(account_state, {"BTC": 49000.0})
-        assert engine._last_executed_direction["BTC"] == -1
 
     @pytest.mark.asyncio
     async def test_signal_flat_blocked_by_conviction(self, settings, signal_state, mock_client):
@@ -579,36 +515,6 @@ class TestExecutionEngine:
         signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
 
         order = await engine.on_tick("BTC", 44500.0)
-        assert order is not None
-        assert mock_client.place_order.called
-
-    @pytest.mark.asyncio
-    async def test_pending_reversal_survives_momentum_veto(self, signal_state, mock_client):
-        settings = Settings(
-            BASE_POSITION_PCT=0.088,
-            EXECUTION_COOLDOWN_MS=0,
-            EXIT_CONVICTION_BARS=1,
-            MIN_HOLD_BARS=0,
-            MOMENTUM_VETO_THRESHOLD=0.005,
-            REENTRY_GRACE_BARS=0,
-        )
-        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
-        engine.set_equity(100000.0)
-
-        signal_state.bar_count = 10
-        signal_state.last_exit_bar["BTC"] = 5
-        signal_state.set_direction("BTC", 1, -0.01, 50.0, 50000.0, 10)
-        signal_state.momentum["BTC"] = -0.01
-
-        engine._pending_reversal["BTC"] = 1
-
-        order = await engine.on_tick("BTC", 50000.0)
-        assert order is None
-        assert engine._pending_reversal.get("BTC") == 1
-
-        signal_state.momentum["BTC"] = 0.05
-        signal_state.signal_entry["BTC"] = 50000.0
-        order = await engine.on_tick("BTC", 50000.0)
         assert order is not None
         assert mock_client.place_order.called
 

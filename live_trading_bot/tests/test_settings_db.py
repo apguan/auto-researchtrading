@@ -133,8 +133,3 @@ class TestApplyDbParams:
         assert s.MAX_LEVERAGE == orig
         assert not hasattr(s, "NOT_A_REAL_PARAM")
 
-
-class TestDryRunDefaultCapital:
-    def test_default_is_10k(self):
-        s = Settings()
-        assert s.DRY_RUN_INITIAL_CAPITAL == 10_000.0

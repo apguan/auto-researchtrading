@@ -133,11 +133,24 @@ class TradingBot:
 
         account_state = await self.client.get_account_state()
 
-        if not self.settings.DRY_RUN:
-            for symbol, pos in account_state.positions.items():
-                self._current_positions[symbol] = (
-                    pos.size if pos.side.value == "long" else -pos.size
-                )
+        for sym, pos in account_state.positions.items():
+            self._current_positions[sym] = (
+                pos.size if pos.side.value == "long" else -pos.size
+            )
+
+        self.execution_engine.set_equity(account_state.total_equity)
+        await self.execution_engine.sync_positions(
+            account_state, self._current_prices
+        )
+
+        if account_state.positions:
+            logger.warning(
+                "Position reconciliation: inherited open positions from previous run",
+                extra={
+                    "symbols": list(account_state.positions.keys()),
+                    "count": len(account_state.positions),
+                },
+            )
 
         if self.stop_manager and not self.settings.DRY_RUN:
             await self.stop_manager.load_existing_stops(

@@ -1,13 +1,23 @@
 #!/bin/bash
-# daily_autoresearch.sh — Run 100 Karpathy-style autoresearch experiments daily via OpenCode
+# daily_autoresearch.sh — Run Karpathy-style autoresearch experiments daily
 #
 # Usage:
 #   ./scripts/daily_autoresearch.sh              # default: 100 experiments in 10 batches
 #   ./scripts/daily_autoresearch.sh 50           # custom total
 #   ./scripts/daily_autoresearch.sh 100 5        # 100 experiments, batch size 5
 #
+# Agent harness (set via env or .env):
+#   AGENT_HARNESS=opencode  ./scripts/daily_autoresearch.sh   # default
+#   AGENT_HARNESS=claude    ./scripts/daily_autoresearch.sh
+#   AGENT_HARNESS=codex     ./scripts/daily_autoresearch.sh
+#   AGENT_HARNESS=cursor    ./scripts/daily_autoresearch.sh
+#   AGENT_HARNESS=mock      ./scripts/daily_autoresearch.sh   # fake agent, tests pipeline
+#
+# Dry-run (prints what would execute, no agent calls):
+#   DRY_RUN=true ./scripts/daily_autoresearch.sh 5 2
+#
 # Cron example (run at 6am UTC daily):
-#   0 6 * * * cd /path/to/auto-researchtrading && ./scripts/daily_autoresearch.sh >> data_pipeline/logs/daily_auto.log 2>&1
+#   0 6 * * * cd /path/to/auto-researchtrading && AGENT_HARNESS=claude ./scripts/daily_autoresearch.sh >> data_pipeline/logs/daily_auto.log 2>&1
 
 set -euo pipefail
 
@@ -25,6 +35,15 @@ TOTAL=${1:-100}
 BATCH_SIZE=${2:-10}
 NUM_BATCHES=$(( (TOTAL + BATCH_SIZE - 1) / BATCH_SIZE ))
 
+AGENT_HARNESS="${AGENT_HARNESS:-opencode}"
+DRY_RUN="${DRY_RUN:-false}"
+
+SUPPORTED_HARNESSES="opencode claude codex cursor mock"
+if ! echo "$SUPPORTED_HARNESSES" | grep -qw "$AGENT_HARNESS"; then
+    echo "ERROR: Unsupported AGENT_HARNESS='$AGENT_HARNESS'. Supported: $SUPPORTED_HARNESSES" >&2
+    exit 1
+fi
+
 LOG_DIR="$REPO_ROOT/data_pipeline/logs"
 mkdir -p "$LOG_DIR"
 DATE_STR=$(date -u +%Y%m%d)
@@ -34,9 +53,38 @@ log() {
     echo "[$(date -u +%Y%m%dT%H%M%S)] $*" | tee -a "$LOG_FILE"
 }
 
+# ── Agent harness dispatch ─────────────────────────────────
+agent_run() {
+    local prompt="$1"
+    if [ "$DRY_RUN" = "true" ] || [ "$AGENT_HARNESS" = "mock" ]; then
+        log "[DRY-RUN/$AGENT_HARNESS] agent_run (batch start): ${prompt:0:100}..."
+        return 0
+    fi
+    case "$AGENT_HARNESS" in
+        opencode) opencode run "$prompt" ;;
+        claude)    claude --bare -p "$prompt" --allowedTools "Bash,Read,Edit" ;;
+        codex)     codex exec --full-auto "$prompt" ;;
+        cursor)    cursor agent -p --force "$prompt" ;;
+    esac
+}
+
+agent_continue() {
+    local prompt="$1"
+    if [ "$DRY_RUN" = "true" ] || [ "$AGENT_HARNESS" = "mock" ]; then
+        log "[DRY-RUN/$AGENT_HARNESS] agent_continue (batch resume): ${prompt:0:100}..."
+        return 0
+    fi
+    case "$AGENT_HARNESS" in
+        opencode) opencode run -c "$prompt" ;;
+        claude)    claude -c -p "$prompt" --allowedTools "Bash,Read,Edit" ;;
+        codex)     codex exec resume --last "$prompt" ;;
+        cursor)    cursor agent --resume --force -p "$prompt" ;;
+    esac
+}
+
 # ── 1. Fresh data ──────────────────────────────────────────────
 log "=== DAILY AUTORESEARCH START ==="
-log "Config: total=$TOTAL, batch_size=$BATCH_SIZE, batches=$NUM_BATCHES"
+log "Config: total=$TOTAL, batch_size=$BATCH_SIZE, batches=$NUM_BATCHES, harness=$AGENT_HARNESS, dry_run=$DRY_RUN"
 
 log "Downloading fresh data (6 months)..."
 rm -rf ~/.cache/autotrader/data/
@@ -91,12 +139,12 @@ Rules:
 - Do NOT stop until you have completed $BATCH_COUNT experiments
 
 Run $BATCH_COUNT experiments now. Do not ask questions. Be autonomous."
-        opencode run "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
+        agent_run "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
     else
         PROMPT="Continue the autoresearch loop. Run $BATCH_COUNT more experiments.
 Same rules — save EVERY experiment to DB, then ALWAYS revert.
 Do not stop until $BATCH_COUNT experiments are done."
-        opencode run -c "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
+        agent_continue "$PROMPT" >> "$LOG_FILE" 2>&1 || log "WARNING: Batch $batch exited with non-zero code"
     fi
 
     log "Batch $batch done."

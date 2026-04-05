@@ -27,7 +27,7 @@ INTERVAL_SYMBOLS: dict[str, list[str]] = {
 
 BENCHMARK_SYMBOLS = [
     "BTC", "ETH", "SOL", "XRP", "HYPE",
-    "ALGO", "LIT", "MON", "NEAR", "TAO", "XPL", "ZEC",
+    "NEAR", "TAO", "ZEC",
 ]
 
 def make_equal_weights(

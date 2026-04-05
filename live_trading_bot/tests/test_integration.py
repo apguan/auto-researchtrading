@@ -152,13 +152,6 @@ async def test_full_tick_execution_cycle(settings, signal_state, mock_client):
 async def test_bar_close_fallback_no_tick_execution(signal_state, mock_client):
     """Signals sit in SignalState when TICK_EXECUTION_ENABLED=False (no engine)."""
 
-    Settings(
-        ENTRY_SLIPPAGE_PCT=0.02,
-        EXECUTION_COOLDOWN_MS=100,
-        EMERGENCY_EXIT_PCT=0.10,
-        STOP_WIDENING_MULT=1.5,
-    )
-
     signal_state.update_signal("BTC", 5000.0, 50.0, 50000.0, None)
 
     assert signal_state.get_target("BTC") == 5000.0
