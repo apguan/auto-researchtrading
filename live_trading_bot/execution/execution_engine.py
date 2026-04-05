@@ -48,6 +48,7 @@ class ExecutionEngine:
         self._entry_prices: Dict[str, float] = {}  # symbol -> fill price
         self._last_executed_direction: Dict[str, int] = {}  # symbol -> +1/-1/0
         self._last_execution_attempt: Dict[str, float] = {}  # symbol -> timestamp
+        self._current_prices: Dict[str, float] = {}  # symbol -> latest tick price
 
         # Per-symbol close info for PnL calculation in bot (symbol -> (entry_price, direction))
         self._pending_close_info: Dict[str, tuple[float, int]] = {}
@@ -92,7 +93,7 @@ class ExecutionEngine:
         if price <= 0:
             return None
 
-        # Update peak/trough tracking in signal state
+        self._current_prices[symbol] = price
         self.signal_state.update_peak_trough(symbol, price)
 
         # Cooldown check (ms-based, prevents rapid-fire execution attempts)
@@ -317,6 +318,28 @@ class ExecutionEngine:
                             "Entry size limited by MAX_POSITION_PCT",
                             extra={"symbol": symbol, "adjusted_usd": round(target_usd, 2)},
                         )
+
+                # Block entry if it would breach MAX_LEVERAGE across all positions
+                if self._equity > 0 and self.settings.MAX_LEVERAGE > 0:
+                    current_exposure = sum(
+                        size * self._current_prices.get(sym, 0)
+                        for sym, size in self._position_sizes.items()
+                        if size > 0
+                    )
+                    max_exposure = self._equity * self.settings.MAX_LEVERAGE
+                    if current_exposure + target_usd > max_exposure:
+                        logger.info(
+                            "Entry blocked — total exposure would exceed MAX_LEVERAGE",
+                            extra={
+                                "symbol": symbol,
+                                "current_exposure": round(current_exposure, 2),
+                                "target_usd": round(target_usd, 2),
+                                "max_exposure": round(max_exposure, 2),
+                                "leverage": f"{(current_exposure + target_usd) / self._equity:.2f}x",
+                            },
+                        )
+                        self._last_execution_attempt[symbol] = now_ms
+                        return None
 
                 size_coins = target_usd / price
                 if size_coins < 0.00001:
@@ -559,3 +582,4 @@ class ExecutionEngine:
         self._pending_reversal.clear()
         self._pending_close_info.clear()
         self._closing.clear()
+        self._current_prices.clear()
