@@ -7,9 +7,8 @@ __pycache__/
 .env
 *.db
 *.log
+logs/
 data_pipeline/logs/
 data_pipeline/tuning_results/
 data_pipeline/backtest_data/
 tune_results*.txt
-!data_pipeline/logs/
-!data_pipeline/logs/auto_tune_1h*.log.env
