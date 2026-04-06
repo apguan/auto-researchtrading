@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import Awaitable, Callable, Dict, List, Optional
 
@@ -33,8 +34,8 @@ class ExecutionEngine:
         client: Exchange,
         settings: Settings,
         symbols: List[str],
-        risk_controller=None,  # Optional[RiskController]
-        position_limiter=None,  # Optional[PositionLimiter]
+        risk_controller=None,
+        position_limiter=None,
     ):
         self.signal_state = signal_state
         self.client = client
@@ -69,16 +70,10 @@ class ExecutionEngine:
         # Callback for when a position is fully closed (for StopManager coordination)
         self.on_position_closed: Optional[Callable[[str], object]] = None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def set_equity(self, equity: float) -> None:
-        """Called by bot on bar close with current equity for sizing."""
         self._equity = equity
 
     def clear_pending_reversal(self, symbol: str) -> None:
-        """Clear pending reversal for a symbol when new direction is set on bar close."""
         self._pending_reversal.pop(symbol, None)
 
     def consume_close_info(self, symbol: str) -> tuple[float, int]:
@@ -125,10 +120,6 @@ class ExecutionEngine:
                 "cooldown": self.signal_state.is_in_cooldown(symbol, self.settings.COOLDOWN_BARS) if current_size == 0 else False,
             },
         )
-
-        # ==============================================================
-        # EXIT CHECKS (only if we have a position)
-        # ==============================================================
 
         if current_size > 0 and entry_price > 0:
 
@@ -241,10 +232,6 @@ class ExecutionEngine:
             )
             return await self._close_position(symbol, price, reason="signal_reversal")
 
-        # ==============================================================
-        # ENTRY CHECKS (only if we're flat)
-        # ==============================================================
-
         if current_size == 0:
             # Guard: skip if an entry order is already in-flight for this symbol
             if symbol in self._pending_orders:
@@ -269,7 +256,6 @@ class ExecutionEngine:
                     self._last_execution_attempt[symbol] = now_ms
                     return None
 
-                # Slippage guard
                 signal_entry = self.signal_state.signal_entry.get(symbol, 0.0)
                 if signal_entry > 0:
                     slippage = abs(price - signal_entry) / signal_entry
@@ -289,7 +275,6 @@ class ExecutionEngine:
                         self._last_execution_attempt[symbol] = now_ms
                         return None
 
-                # Direction-aware momentum sizing
                 target_usd = self._calculate_position_size(symbol, effective_direction, is_pending_reversal=(pending_dir is not None))
                 if target_usd <= 0:
                     if pending_dir is not None:
@@ -395,12 +380,7 @@ class ExecutionEngine:
                 self._last_execution_attempt[symbol] = now_ms
                 return order
 
-        # Hold — no action
         return None
-
-    # ------------------------------------------------------------------
-    # Position sizing
-    # ------------------------------------------------------------------
 
     def _calculate_position_size(self, symbol: str, direction: int, is_pending_reversal: bool = False) -> float:
         """Direction-aware momentum sizing.
@@ -469,10 +449,6 @@ class ExecutionEngine:
 
         return size
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     async def _close_position(
         self, symbol: str, price: float, reason: str
     ) -> Optional[Order]:
@@ -517,6 +493,29 @@ class ExecutionEngine:
         finally:
             self._closing.discard(symbol)
 
+        if order.status not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            # Single retry after 1 second for rejected close orders
+            logger.warning(
+                "Close order did not fill — retrying in 1s",
+                extra={
+                    "symbol": symbol,
+                    "status": order.status.value,
+                    "reason": reason,
+                },
+            )
+            await asyncio.sleep(1)
+            self._closing.add(symbol)
+            try:
+                order = await self.client.place_order(
+                    symbol=symbol,
+                    side=close_side,
+                    size=round(current_size, 8),
+                    order_type=OrderType.MARKET,
+                    reduce_only=True,
+                )
+            finally:
+                self._closing.discard(symbol)
+
         if order.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
             self._position_sizes[symbol] = 0.0
             self._entry_prices[symbol] = 0.0
@@ -543,18 +542,22 @@ class ExecutionEngine:
                         extra={"symbol": symbol, "error": str(e)},
                     )
         else:
-            logger.warning(
-                "Close order did not fill — clearing internal tracking "
-                "(position may have been closed externally)",
+            # Close failed after retry — preserve position tracking to prevent
+            # doubling exposure. sync_positions on next bar will reconcile with
+            # exchange state.
+            logger.critical(
+                "Close order failed after retry — position tracking preserved "
+                "(position may still be open on exchange)",
                 extra={
                     "symbol": symbol,
                     "status": order.status.value,
                     "reason": reason,
                 },
             )
-            self._position_sizes[symbol] = 0.0
-            self._entry_prices[symbol] = 0.0
-            self._last_executed_direction[symbol] = 0
+            # Set extended cooldown (4x normal) to prevent immediate re-attempts
+            self._last_execution_attempt[symbol] = (
+                time.time() * 1000 + self.settings.EXECUTION_COOLDOWN_MS * 3
+            )
 
         return order
 
