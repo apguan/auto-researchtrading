@@ -45,6 +45,9 @@ HYPERLIQUID_API_URL = "https://api.hyperliquid.xyz"
 HYPERLIQUID_WS_URL = "wss://api.hyperliquid.xyz/ws"
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 
+HYPERLIQUID_TESTNET_API_URL = "https://api.hyperliquid-testnet.xyz"
+HYPERLIQUID_TESTNET_WS_URL = "wss://api.hyperliquid-testnet.xyz/ws"
+
 
 INTERVAL_MINUTES: dict[str, int] = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
 VALID_INTERVALS = list(INTERVAL_MINUTES.keys())
