@@ -11,9 +11,22 @@ if str(_REPO_ROOT) not in sys.path:
 from constants import ALL_SYMBOLS, INTERVAL_SYMBOLS, make_equal_weights, LOOKBACK_BARS
 from constants import STRATEGY_DEFAULTS as _STRATEGY_DEFAULTS
 from constants import PARAM_COLUMNS, INT_PARAMS as _INT_PARAMS
-from symbol_utils import discover_usdc_perps
+from constants import HYPERLIQUID_API_URL, HYPERLIQUID_TESTNET_API_URL, HYPERLIQUID_TESTNET_WS_URL
 
 _HOUR_DEFAULTS = _STRATEGY_DEFAULTS["1h"]
+
+
+def _discover_usdc_cross_margin_perps(api_url: str = HYPERLIQUID_API_URL) -> list[str]:
+    try:
+        import asyncio
+        from hyperliquid.info import Info
+        from live_trading_bot.exchange.hyperliquid import fetch_usdc_cross_margin_perps
+
+        info = Info(base_url=api_url, skip_ws=True)
+        return asyncio.run(fetch_usdc_cross_margin_perps(info))
+    except Exception:
+        return list(ALL_SYMBOLS)
+
 
 
 def _load_active_db_params() -> dict[str, int | float | list[str]]:
@@ -134,6 +147,7 @@ class Settings:
     ALERT_INSTANCE_NAME: str = ""
 
     DRY_RUN: bool = False
+    USE_TESTNET: bool = False
     DRY_RUN_INITIAL_CAPITAL: float = 10_000.0
     DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
 
@@ -154,6 +168,20 @@ class Settings:
     def from_env(cls) -> "Settings":
         settings = cls()
 
+        # Resolve USE_TESTNET and API URLs first — needed for symbol discovery
+        if val := os.getenv("USE_TESTNET"):
+            settings.USE_TESTNET = val.lower() in ("true", "1", "yes")
+
+        if val := os.getenv("HYPERLIQUID_API_URL"):
+            settings.HYPERLIQUID_API_URL = val
+        elif settings.USE_TESTNET:
+            settings.HYPERLIQUID_API_URL = HYPERLIQUID_TESTNET_API_URL
+
+        if val := os.getenv("HYPERLIQUID_WS_URL"):
+            settings.HYPERLIQUID_WS_URL = val
+        elif settings.USE_TESTNET:
+            settings.HYPERLIQUID_WS_URL = HYPERLIQUID_TESTNET_WS_URL
+
         # Resolve BAR_INTERVAL first so TRADING_PAIRS can default from it
         if val := os.getenv("BAR_INTERVAL"):
             settings.BAR_INTERVAL = val
@@ -161,7 +189,7 @@ class Settings:
         if val := os.getenv("TRADING_PAIRS"):
             settings.TRADING_PAIRS = val.split(",")
         else:
-            settings.TRADING_PAIRS = discover_usdc_perps()
+            settings.TRADING_PAIRS = _discover_usdc_cross_margin_perps(settings.HYPERLIQUID_API_URL)
         settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
 
         if val := os.getenv("MAX_LEVERAGE"):
