@@ -45,7 +45,7 @@ TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 5  # out of 6 (OBV removed)
+MIN_VOTES = 4  # out of 5 (OBV+RSI entry removed)
 REGIME_THRESHOLD = 1.1  # effectively disabled — never blocks entries
 
 
@@ -154,11 +154,12 @@ class Strategy:
                 vol_bull = obv[-1] > obv_ma
                 vol_bear = obv[-1] < obv_ma
 
+            # RSI used only for exit, not entry votes
             bull_votes = sum(
-                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed]
+                [mom_bull, vshort_bull, ema_bull, macd_bull, bb_compressed]
             )
             bear_votes = sum(
-                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed]
+                [mom_bear, vshort_bear, ema_bear, macd_bear, bb_compressed]
             )
 
             bullish = bull_votes >= MIN_VOTES
