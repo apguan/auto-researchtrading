@@ -46,6 +46,7 @@ BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
 MIN_VOTES = 5  # out of 7
+REGIME_THRESHOLD = 0.6  # fraction of symbols trending same direction to declare market regime
 
 
 class Strategy:
@@ -72,6 +73,27 @@ class Strategy:
             new = [s for s in bar_data if s not in _RUNTIME_SYMBOLS]
             if new:
                 _RUNTIME_SYMBOLS = sorted(_RUNTIME_SYMBOLS + new)
+
+        # --- Market regime pre-pass ---
+        bullish_count = 0
+        bearish_count = 0
+        regime_total = 0
+
+        for _sym, _bd in bar_data.items():
+            _closes = _bd.history["close"].values
+            if len(_closes) < MED_WINDOW + 1:
+                continue
+            if _bd.close <= 0 or _closes[-MED_WINDOW] <= 0:
+                continue
+            _ret = (_closes[-1] - _closes[-MED_WINDOW]) / max(_closes[-MED_WINDOW], 1e-10)
+            regime_total += 1
+            if _ret > 0:
+                bullish_count += 1
+            else:
+                bearish_count += 1
+
+        market_bullish = regime_total > 0 and (bullish_count / regime_total) >= REGIME_THRESHOLD
+        market_bearish = regime_total > 0 and (bearish_count / regime_total) >= REGIME_THRESHOLD
 
         for symbol, bd in bar_data.items():
             if (
@@ -162,9 +184,9 @@ class Strategy:
 
             if current_pos == 0:
                 if not in_cooldown:
-                    if bullish:
+                    if bullish and not market_bearish:
                         target = size
-                    elif bearish:
+                    elif bearish and not market_bullish:
                         target = -size
             else:
                 atr = calc_atr(bd.history, ATR_LOOKBACK)
@@ -199,9 +221,9 @@ class Strategy:
                     target = 0.0
 
                 if current_pos > 0 and bearish and not in_cooldown:
-                    target = -size
+                    target = -size if not market_bullish else 0
                 elif current_pos < 0 and bullish and not in_cooldown:
-                    target = size
+                    target = size if not market_bearish else 0
 
             if abs(target - current_pos) > 1.0:
                 signals.append(Signal(symbol=symbol, target_position=target))
