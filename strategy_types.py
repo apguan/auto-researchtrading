@@ -51,3 +51,4 @@ class BacktestResult:
     annual_turnover: float = 0.0
     backtest_seconds: float = 0.0
     equity_curve: list = field(default_factory=list)
+    trade_log: list = field(default_factory=list)
