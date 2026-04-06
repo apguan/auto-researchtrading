@@ -38,6 +38,12 @@ class DryExchange:
         )
         self._nonce_counter = int(time.time() * 1000)
 
+        # Cache szDecimals for each asset (fetched lazily, mirrors HyperliquidClient)
+        self._sz_decimals: Dict[str, int] = {}
+
+        # Taker fee on Hyperliquid: 5 basis points (0.05%)
+        self.TAKER_FEE_BPS = 0.0005
+
         self.ledger = DryRunLedger(
             path=self.settings.DRY_RUN_STATE_PATH,
             initial_equity=self.settings.DRY_RUN_INITIAL_CAPITAL,
@@ -47,6 +53,15 @@ class DryExchange:
     def _get_nonce(self) -> int:
         self._nonce_counter += 1
         return self._nonce_counter
+
+    def _round_size(self, symbol: str, size: float) -> float:
+        """Round order size to the asset's szDecimals precision (mirrors HyperliquidClient)."""
+        if symbol not in self._sz_decimals:
+            meta = self._info.meta()
+            for asset in meta.get("universe", []):
+                self._sz_decimals[asset["name"]] = asset.get("szDecimals", 0)
+        decimals = self._sz_decimals.get(symbol, 0)
+        return round(size, decimals)
 
     async def get_account_state(self) -> AccountState:
         positions: Dict[str, Position] = {}
@@ -115,6 +130,37 @@ class DryExchange:
         reduce_only: bool = False,
     ) -> Order:
         fill_price = price or await self.get_mid_price(symbol)
+        original_size = size
+        size = self._round_size(symbol, size)
+
+        if size != original_size:
+            logger.debug(
+                "Dry order size rounded",
+                extra={
+                    "symbol": symbol,
+                    "original_size": original_size,
+                    "rounded_size": size,
+                    "sz_decimals": self._sz_decimals.get(symbol, 0),
+                },
+            )
+
+        if size <= 0:
+            logger.debug(
+                "Dry order rejected: size rounded to zero",
+                extra={"symbol": symbol, "original_size": original_size},
+            )
+            return Order(
+                id=f"dry-{self._get_nonce()}",
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                size=size,
+                price=fill_price,
+                status=OrderStatus.REJECTED,
+                filled_size=0.0,
+                avg_fill_price=fill_price,
+            )
+
         applied = self._apply_fill(symbol, side, size, fill_price, reduce_only)
         self.ledger.save()
 
@@ -202,6 +248,11 @@ class DryExchange:
                 pnl = (fill_price - pos.entry_price) * close_size
             else:
                 pnl = (pos.entry_price - fill_price) * close_size
+
+            # Deduct taker fee (paid on close)
+            fee = fill_price * close_size * self.TAKER_FEE_BPS
+            pnl -= fee
+
             self.ledger.add_realized_pnl(pnl)
 
             remaining = pos.size - close_size
@@ -214,6 +265,7 @@ class DryExchange:
                     "side": "buy" if is_buy else "sell",
                     "size": close_size,
                     "price": fill_price,
+                    "fee": round(fee, 10),
                     "pnl": round(pnl, 10),
                     "realized_pnl_cumulative": round(self.ledger.realized_pnl, 10),
                 })
@@ -226,6 +278,7 @@ class DryExchange:
                     "side": "buy" if is_buy else "sell",
                     "size": close_size,
                     "price": fill_price,
+                    "fee": round(fee, 10),
                     "pnl": round(pnl, 10),
                     "realized_pnl_cumulative": round(self.ledger.realized_pnl, 10),
                 })

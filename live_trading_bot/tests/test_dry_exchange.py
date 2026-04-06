@@ -62,16 +62,16 @@ class TestApplyFill:
         exchange._apply_fill("BTC", OrderSide.SELL, 0.1, 52000.0, True)
 
         assert "BTC" not in exchange.ledger.positions
-        # PnL = (52000 - 50000) * 0.1 = 200
-        assert exchange.ledger.realized_pnl == pytest.approx(200.0)
+        # PnL = (52000 - 50000) * 0.1 - fee = 200 - (52000 * 0.1 * 0.0005) = 200 - 2.6 = 197.4
+        assert exchange.ledger.realized_pnl == pytest.approx(197.4)
 
     def test_close_short_realizes_pnl(self, exchange):
         exchange._apply_fill("ETH", OrderSide.SELL, 1.0, 3000.0, False)
         exchange._apply_fill("ETH", OrderSide.BUY, 1.0, 2800.0, True)
 
         assert "ETH" not in exchange.ledger.positions
-        # PnL = (3000 - 2800) * 1.0 = 200
-        assert exchange.ledger.realized_pnl == pytest.approx(200.0)
+        # PnL = (3000 - 2800) * 1.0 - fee = 200 - (2800 * 1.0 * 0.0005) = 200 - 1.4 = 198.6
+        assert exchange.ledger.realized_pnl == pytest.approx(198.6)
 
     def test_partial_close(self, exchange):
         exchange._apply_fill("BTC", OrderSide.BUY, 0.2, 50000.0, False)
@@ -80,8 +80,8 @@ class TestApplyFill:
         pos = exchange.ledger.positions["BTC"]
         assert pos.size == pytest.approx(0.1)
         assert pos.entry_price == 50000.0
-        # PnL = (51000 - 50000) * 0.1 = 100
-        assert exchange.ledger.realized_pnl == pytest.approx(100.0)
+        # PnL = (51000 - 50000) * 0.1 - fee = 100 - (51000 * 0.1 * 0.0005) = 100 - 2.55 = 97.45
+        assert exchange.ledger.realized_pnl == pytest.approx(97.45)
 
     def test_reversal_without_reduce_only(self, exchange):
         """Close long then open short in a single fill (no reduce_only)."""
@@ -93,8 +93,8 @@ class TestApplyFill:
         assert pos.is_long is False
         assert pos.size == pytest.approx(0.1)
         assert pos.entry_price == 51000.0
-        # Realized from closing the long: (51000 - 50000) * 0.1 = 100
-        assert exchange.ledger.realized_pnl == pytest.approx(100.0)
+        # Realized from closing the long: (51000 - 50000) * 0.1 - fee = 100 - (51000 * 0.1 * 0.0005) = 100 - 2.55 = 97.45
+        assert exchange.ledger.realized_pnl == pytest.approx(97.45)
 
     def test_add_to_position_averages_entry(self, exchange):
         exchange._apply_fill("BTC", OrderSide.BUY, 0.1, 50000.0, False)
@@ -116,6 +116,8 @@ class TestPlaceOrder:
     @pytest.mark.asyncio
     async def test_market_order_fills_and_tracks(self, exchange):
         exchange.get_mid_price = AsyncMock(return_value=50000.0)
+        # Set size decimals so 0.1 doesn't round to 0.0
+        exchange._sz_decimals = {"BTC": 8}
 
         order = await exchange.place_order("BTC", OrderSide.BUY, 0.1, OrderType.MARKET)
 
@@ -171,6 +173,7 @@ class TestAccountState:
 
         state = await exchange.get_account_state()
 
-        # Realized PnL = (48000 - 50000) * 0.1 = -200
-        assert state.total_equity == pytest.approx(9_800.0)
+        # Realized PnL = (48000 - 50000) * 0.1 - fee = -200 - (48000 * 0.1 * 0.0005) = -200 - 2.4 = -202.4
+        # Equity = 10000 - 202.4 = 9797.6
+        assert state.total_equity == pytest.approx(9_797.6)
         assert state.positions == {}
