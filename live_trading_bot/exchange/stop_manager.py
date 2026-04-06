@@ -23,7 +23,6 @@ class StopManager:
             logger.error("Failed to load existing stops", extra={"error": str(e)})
             return 0
 
-        # Group trigger orders by symbol
         triggers_by_symbol: Dict[str, list[Order]] = {}
         for order in open_orders:
             if order.order_type != OrderType.TRIGGER:
@@ -127,12 +126,10 @@ class StopManager:
         self, positions: Dict[str, Position], atrs: Dict[str, float]
     ) -> None:
         """Refresh stops for all open positions. Cancel stops for closed positions."""
-        # Cancel stops for symbols with no position
         for symbol in list(self._stops.keys()):
             if symbol not in positions or positions[symbol].size == 0:
                 await self.cancel_stop(symbol)
 
-        # Place/update stops for open positions
         widening_mult = self.settings.STOP_WIDENING_MULT
         for symbol, pos in positions.items():
             if pos.size == 0:
@@ -154,7 +151,7 @@ class StopManager:
             # For longs: stop below entry. For shorts: stop above entry.
             # Use simple fixed-distance stop from entry (not trailing)
             # since we can't track peaks/troughs on the exchange.
-            atr_stop_mult = 5.5
+            atr_stop_mult = self.settings.ATR_STOP_MULT
             stop_distance = atr * atr_stop_mult * widening_mult
             if pos.side.value == "long":
                 stop_price = round(entry - stop_distance, 2)
