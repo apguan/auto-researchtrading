@@ -119,7 +119,7 @@ class Strategy:
             mom_bull = ret_short > dyn_threshold
             mom_bear = ret_short < -dyn_threshold
             vshort_bull = ret_vshort > dyn_threshold * 0.45
-            vshort_bear = ret_vshort < -dyn_threshold * 0.45
+            vshort_bear = ret_vshort < -dyn_threshold * 0.4
 
             ema_fast_arr = ema(closes[-(EMA_SLOW + 10) :], EMA_FAST)
             ema_slow_arr = ema(closes[-(EMA_SLOW + 10) :], EMA_SLOW)
