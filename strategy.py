@@ -17,7 +17,7 @@ ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]  # fallback for _RUNTIME_SYMBOLS init; u
 # Used by save_experiment_to_db() to persist the dynamic symbol set.
 _RUNTIME_SYMBOLS: list[str] = list(ACTIVE_SYMBOLS)
 
-SHORT_WINDOW = 5
+SHORT_WINDOW = 6
 MED_WINDOW = 10
 MED2_WINDOW = 24
 LONG_WINDOW = 48
