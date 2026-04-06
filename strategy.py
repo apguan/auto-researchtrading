@@ -45,7 +45,7 @@ TAKE_PROFIT_PCT = 99.0
 BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
-MIN_VOTES = 5  # out of 7
+MIN_VOTES = 5  # out of 6 (OBV removed)
 REGIME_THRESHOLD = 0.6  # fraction of symbols trending same direction to declare market regime
 
 
@@ -155,10 +155,10 @@ class Strategy:
                 vol_bear = obv[-1] < obv_ma
 
             bull_votes = sum(
-                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed, vol_bull]
+                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed]
             )
             bear_votes = sum(
-                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed, vol_bear]
+                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed]
             )
 
             bullish = bull_votes >= MIN_VOTES
