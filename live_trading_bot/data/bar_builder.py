@@ -119,6 +119,12 @@ class BarBuilder:
         for callback in self._bar_callbacks:
             try:
                 if asyncio.iscoroutinefunction(callback):
+                    # NOTE: create_task makes the bar callback concurrent with the
+                    # WebSocket message loop. Ticks can (and do) interleave with
+                    # _on_bar() during any of its await calls. Any exchange state
+                    # fetched inside _on_bar must be re-fetched before use if
+                    # ticks could have modified positions in the interim.
+                    # See: bot.py _fresh_sync_positions() for the fix.
                     asyncio.create_task(callback(symbol, candle))
                 else:
                     callback(symbol, candle)

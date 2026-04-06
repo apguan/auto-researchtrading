@@ -429,3 +429,97 @@ class TestSyncPositionsSkipsClosingSymbols:
         assert engine._entry_prices["BTC"] == 50000.0
 
         engine._closing.discard("BTC")
+
+
+class TestFreshSyncPreventsRaceCondition:
+    """Bug: _on_bar() runs as asyncio.create_task (bar_builder.py:122), so ticks
+    interleave during its await calls. The account_state snapshot fetched at bar
+    start (bot.py:223) becomes stale when a tick fills an order mid-bar.
+    sync_positions() then wipes the just-filled position using this stale snapshot.
+
+    Fix: bot.py._fresh_sync_positions() re-fetches account_state immediately
+    before calling sync_positions, so the snapshot always includes recent fills.
+
+    This test tells us: sync_positions will wipe a recently-filled position when
+    given stale (empty) account_state — confirming the exact mechanism that caused
+    64% of live entries to be duplicates."""
+
+    @pytest.mark.asyncio
+    async def test_stale_sync_wipes_position(self, settings, signal_state, mock_client):
+        """Reproduces the bug: fill a position, then sync with stale (empty) data."""
+        engine = ExecutionEngine(signal_state, mock_client, settings, ["ALGO"])
+        engine.set_equity(200.0)
+
+        # Signal: short ALGO
+        signal_state.set_direction("ALGO", -1, -0.05, 0.005, 0.12, bar_count=10)
+
+        mock_client.place_order = AsyncMock(
+            return_value=_make_filled_order(
+                symbol="ALGO", side=OrderSide.SELL, size=496.0, price=0.12
+            )
+        )
+
+        # Fill via on_tick
+        order = await engine.on_tick("ALGO", 0.12)
+        assert order is not None
+        assert engine._position_sizes["ALGO"] == 496.0
+
+        # Sync with STALE (empty) account state — simulates the create_task race
+        stale_state = AccountState(
+            wallet_address="0xTest",
+            total_equity=200.0,
+            available_balance=200.0,
+            margin_used=0.0,
+            unrealized_pnl=0.0,
+            positions={},  # stale: no positions (snapshot from before the fill)
+        )
+        await engine.sync_positions(stale_state, {"ALGO": 0.12})
+
+        assert engine._position_sizes.get("ALGO", 0) == 0.0, (
+            "Stale sync MUST wipe the position — this confirms the bug mechanism"
+        )
+        assert engine._last_executed_direction.get("ALGO", 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_fresh_sync_preserves_position(self, settings, signal_state, mock_client):
+        """The fix: if sync gets a FRESH snapshot that includes the fill, position survives."""
+        engine = ExecutionEngine(signal_state, mock_client, settings, ["ALGO"])
+        engine.set_equity(200.0)
+
+        signal_state.set_direction("ALGO", -1, -0.05, 0.005, 0.12, bar_count=10)
+
+        mock_client.place_order = AsyncMock(
+            return_value=_make_filled_order(
+                symbol="ALGO", side=OrderSide.SELL, size=496.0, price=0.12
+            )
+        )
+
+        order = await engine.on_tick("ALGO", 0.12)
+        assert order is not None
+        assert engine._position_sizes["ALGO"] == 496.0
+
+        # Sync with FRESH account state that includes the filled position
+        fresh_state = AccountState(
+            wallet_address="0xTest",
+            total_equity=200.0,
+            available_balance=140.0,
+            margin_used=60.0,
+            unrealized_pnl=0.0,
+            positions={
+                "ALGO": Position(
+                    symbol="ALGO",
+                    side=PositionSide.SHORT,
+                    size=496.0,
+                    entry_price=0.12,
+                    current_price=0.12,
+                    unrealized_pnl=0.0,
+                    leverage=10.0,
+                )
+            },
+        )
+        await engine.sync_positions(fresh_state, {"ALGO": 0.12})
+
+        assert engine._position_sizes["ALGO"] == 496.0, (
+            "Fresh sync must preserve the position — HL settles in <300ms"
+        )
+        assert engine._last_executed_direction["ALGO"] == -1
