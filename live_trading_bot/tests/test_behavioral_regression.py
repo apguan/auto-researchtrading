@@ -69,12 +69,12 @@ def mock_client():
     return client
 
 
-class TestReversalBypassesCooldown:
-    """Bug: pending_reversal was popped but cooldown blocked re-entry.
-    Reversals should re-enter on the next tick (Option A), ignoring bar cooldown."""
+class TestReversalRespectsCooldown:
+    """Reversals re-enter after cooldown expires (not immediately).
+    The pending_reversal survives across ticks until cooldown clears."""
 
     @pytest.mark.asyncio
-    async def test_reversal_re_enters_next_tick(self, settings, signal_state, mock_client):
+    async def test_reversal_re_enters_after_cooldown(self, settings, signal_state, mock_client):
         engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
         engine.set_equity(100000.0)
 
@@ -97,8 +97,20 @@ class TestReversalBypassesCooldown:
         time.sleep(0.05)
         mock_client.place_order.reset_mock()
 
+        # Still in cooldown — re-entry blocked
+        reentry_blocked = await engine.on_tick("BTC", 49000.0)
+        assert reentry_blocked is None, "Reversal should be blocked by cooldown"
+
+        # Advance bar_count past cooldown (COOLDOWN_BARS=2, exited at bar 2, clear at bar 4)
+        signal_state.bar_count = 4
+        signal_state.set_direction("BTC", -1, -0.03, 50.0, 49000.0, bar_count=4)
+
+        mock_client.place_order = AsyncMock(
+            return_value=_make_filled_order(side=OrderSide.SELL, size=0.1, price=49000.0)
+        )
+
         reentry_order = await engine.on_tick("BTC", 49000.0)
-        assert reentry_order is not None, "Reversal should re-enter on next tick, cooldown must not block"
+        assert reentry_order is not None, "Reversal should re-enter after cooldown expires"
         call_kwargs = mock_client.place_order.call_args.kwargs
         assert call_kwargs["side"] == OrderSide.SELL
         assert engine._last_executed_direction["BTC"] == -1
@@ -335,8 +347,8 @@ class TestPerSymbolCloseInfo:
 
 
 class TestPendingReversalSurvivesMomentumVeto:
-    """Pending reversals now survive momentum veto (improvement #1).
-    Within grace period, momentum veto is skipped entirely (improvement #3)."""
+    """Pending reversals survive cooldown and re-enter once it expires.
+    The _pending_reversal dict persists across ticks until cooldown clears."""
 
     @pytest.mark.asyncio
     async def test_reversal_succeeds_within_grace_period(self, settings, signal_state, mock_client):
@@ -363,8 +375,16 @@ class TestPendingReversalSurvivesMomentumVeto:
         time.sleep(0.05)
         mock_client.place_order.reset_mock()
 
+        # Advance bar_count past cooldown (COOLDOWN_BARS=2, exited at bar 2, clear at bar 4)
+        signal_state.bar_count = 4
+        signal_state.set_direction("BTC", -1, 0.02, 50.0, 49000.0, bar_count=4)
+
+        mock_client.place_order = AsyncMock(
+            return_value=_make_filled_order(side=OrderSide.SELL, size=0.1, price=49000.0)
+        )
+
         reentry = await engine.on_tick("BTC", 49000.0)
-        assert reentry is not None, "Re-entry should succeed within grace period"
+        assert reentry is not None, "Re-entry should succeed after cooldown within grace period"
         assert engine._pending_reversal.get("BTC") is None, "Pending reversal cleared on fill"
 
 

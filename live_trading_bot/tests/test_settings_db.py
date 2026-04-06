@@ -34,7 +34,7 @@ class TestLoadActiveDbParams:
     def test_active_row_returns_params(self):
         from constants import PARAM_COLUMNS, INT_PARAMS
 
-        row = []
+        row = ["BTC,ETH"]
         for name in PARAM_COLUMNS:
             if name == "RSI_BULL":
                 row.append(50)
@@ -58,7 +58,8 @@ class TestLoadActiveDbParams:
 
             with patch("psycopg2.connect", return_value=mock_conn):
                 result = _load_active_db_params()
-                assert len(result) == len(PARAM_COLUMNS)
+                assert len(result) == len(PARAM_COLUMNS) + 1  # +1 for TRADING_PAIRS from symbol column
+                assert result["TRADING_PAIRS"] == ["BTC", "ETH"]
                 assert result["RSI_BULL"] == 50
                 assert result["BASE_POSITION_PCT"] == 0.10
                 assert result["COOLDOWN_BARS"] == 5
@@ -67,7 +68,7 @@ class TestLoadActiveDbParams:
     def test_int_params_cast_correctly(self):
         from constants import INT_PARAMS, PARAM_COLUMNS
 
-        row = []
+        row = ["BTC,ETH"]
         for name in PARAM_COLUMNS:
             row.append(42 if name in INT_PARAMS else 3.14)
 
