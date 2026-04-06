@@ -208,7 +208,7 @@ class TestExecutionEngine:
         assert engine._position_sizes["BTC"] == 0.2
 
     @pytest.mark.asyncio
-    async def test_non_filled_close_clears_internal_state(
+    async def test_non_filled_close_preserves_internal_state(
         self, settings, signal_state, mock_client
     ):
         rejected_order = Order(
@@ -233,9 +233,10 @@ class TestExecutionEngine:
         order = await engine.on_tick("BTC", 50500.0)
         assert order is not None
         assert order.status == OrderStatus.REJECTED
-        assert engine._position_sizes["BTC"] == 0.0
-        assert engine._entry_prices["BTC"] == 0.0
-        assert engine._last_executed_direction["BTC"] == 0
+        # Position tracking is preserved on rejected close (new behavior)
+        assert engine._position_sizes["BTC"] == 0.1
+        assert engine._entry_prices["BTC"] == 50000.0
+        assert engine._last_executed_direction["BTC"] == 1
 
     def test_calculate_position_size_momentum_weighting(
         self, signal_state, mock_client
