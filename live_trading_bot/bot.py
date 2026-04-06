@@ -133,6 +133,12 @@ class TradingBot:
 
         account_state = await self.client.get_account_state()
 
+        if account_state.total_equity <= 0:
+            raise RuntimeError(
+                f"Account equity is ${account_state.total_equity:.2f}. "
+                f"Check HYPERLIQUID_MAIN_WALLET env var and wallet funding."
+            )
+
         for sym, pos in account_state.positions.items():
             self._current_positions[sym] = (
                 pos.size if pos.side.value == "long" else -pos.size
@@ -195,7 +201,6 @@ class TradingBot:
         return positions_usd
 
     async def _on_bar(self, symbol: str, candle: Candle):
-        """On bar close: run strategy → set direction in signal_state → update execution engine equity."""
         if not self._running:
             return
 
@@ -240,10 +245,8 @@ class TradingBot:
                 if sym in prices:
                     self._current_prices[sym] = prices[sym]
 
-            # Get all histories from streamer
             histories = self.data_streamer.get_all_histories()
 
-            # Sync positions from exchange
             for sym in self.settings.TRADING_PAIRS:
                 self._current_positions.pop(sym, None)
             for sym, pos in account_state.positions.items():
@@ -264,7 +267,6 @@ class TradingBot:
                     )
                     return
 
-            # Run strategy
             signals = self.strategy.on_bar(
                 histories=histories,
                 account_state=account_state,
@@ -288,7 +290,6 @@ class TradingBot:
                 },
             )
 
-            # Extract direction + momentum → signal_state
             for sig in signals:
                 direction = (
                     1 if sig.target_position > 0
@@ -352,7 +353,6 @@ class TradingBot:
                 account_state, self._current_prices
             )
 
-            # Log position state after bar
             pos_state = {
                 s: {
                     "direction": (

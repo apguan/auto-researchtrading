@@ -149,15 +149,12 @@ class Settings:
     DRY_RUN_INITIAL_CAPITAL: float = 10_000.0
     DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
 
-    # Tick execution settings
     ENTRY_SLIPPAGE_PCT: float = 0.02
     EXECUTION_COOLDOWN_MS: int = 5000
 
-    # Safety net settings
     EMERGENCY_EXIT_PCT: float = 0.10
     STOP_WIDENING_MULT: float = 1.5
 
-    # Watchdog settings
     WATCHDOG_INTERVAL_SECONDS: int = 30
     WATCHDOG_HEARTBEAT_PATH: str = "/tmp/trading_bot_heartbeat"
 
@@ -181,6 +178,15 @@ class Settings:
 
         if val := os.getenv("MAX_LEVERAGE"):
             settings.MAX_LEVERAGE = float(val)
+        else:
+            from live_trading_bot.monitoring.logger import get_logger as _get_logger
+
+            _logger = _get_logger(__name__)
+            if settings.MAX_LEVERAGE == 3.0 and not settings.DRY_RUN:
+                _logger.warning(
+                    "MAX_LEVERAGE is using code default (3.0). "
+                    "Set MAX_LEVERAGE env var explicitly. See .env.example."
+                )
 
         if val := os.getenv("MAX_POSITION_PCT"):
             settings.MAX_POSITION_PCT = float(val)
