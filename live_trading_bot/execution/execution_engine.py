@@ -56,6 +56,9 @@ class ExecutionEngine:
         # Symbols currently in the process of closing (prevent sync_positions re-hydrating)
         self._closing: set = set()
 
+        # Symbols with in-flight entry orders (prevents duplicate opens)
+        self._pending_orders: set = set()
+
         # Equity for position sizing (set by bot on bar close via set_equity)
         self._equity: float = 0.0
 
@@ -243,6 +246,10 @@ class ExecutionEngine:
         # ==============================================================
 
         if current_size == 0:
+            # Guard: skip if an entry order is already in-flight for this symbol
+            if symbol in self._pending_orders:
+                return None
+
             # Check for pending reversal first (Option A: re-enter after close)
             pending_dir = self._pending_reversal.get(symbol, None)
             if pending_dir is not None:
@@ -251,8 +258,8 @@ class ExecutionEngine:
                 effective_direction = target_direction
 
             if effective_direction != 0:
-                # Bar-based cooldown — skip for pending reversals (Option A: re-enter on next tick)
-                if pending_dir is None and self.signal_state.is_in_cooldown(
+                # Bar-based cooldown — applies to all entries including pending reversals
+                if self.signal_state.is_in_cooldown(
                     symbol, self.settings.COOLDOWN_BARS
                 ):
                     logger.debug(
@@ -361,25 +368,29 @@ class ExecutionEngine:
                     },
                 )
 
-                order = await self.client.place_order(
-                    symbol=symbol,
-                    side=side,
-                    size=round(size_coins, 8),
-                    order_type=OrderType.MARKET,
-                    reduce_only=False,
-                )
+                self._pending_orders.add(symbol)
+                try:
+                    order = await self.client.place_order(
+                        symbol=symbol,
+                        side=side,
+                        size=round(size_coins, 8),
+                        order_type=OrderType.MARKET,
+                        reduce_only=False,
+                    )
 
-                if order.status in (
-                    OrderStatus.FILLED,
-                    OrderStatus.PARTIALLY_FILLED,
-                ):
-                    self._position_sizes[symbol] = order.filled_size
-                    self._entry_prices[symbol] = order.avg_fill_price or price
-                    self._last_executed_direction[symbol] = effective_direction
-                    self.signal_state.entry_bar[symbol] = self.signal_state.bar_count
-                    self._pending_reversal.pop(symbol, None)
-                elif pending_dir is not None:
-                    self._pending_reversal.pop(symbol, None)
+                    if order.status in (
+                        OrderStatus.FILLED,
+                        OrderStatus.PARTIALLY_FILLED,
+                    ):
+                        self._position_sizes[symbol] = order.filled_size
+                        self._entry_prices[symbol] = order.avg_fill_price or price
+                        self._last_executed_direction[symbol] = effective_direction
+                        self.signal_state.entry_bar[symbol] = self.signal_state.bar_count
+                        self._pending_reversal.pop(symbol, None)
+                    elif pending_dir is not None:
+                        self._pending_reversal.pop(symbol, None)
+                finally:
+                    self._pending_orders.discard(symbol)
 
                 self._last_execution_attempt[symbol] = now_ms
                 return order
@@ -585,4 +596,5 @@ class ExecutionEngine:
         self._pending_reversal.clear()
         self._pending_close_info.clear()
         self._closing.clear()
+        self._pending_orders.clear()
         self._current_prices.clear()
