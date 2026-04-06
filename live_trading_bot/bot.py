@@ -170,6 +170,25 @@ class TradingBot:
             urgent=True,
         )
 
+    async def _fresh_sync_positions(self) -> None:
+        """Re-fetch account state and sync execution engine positions.
+
+        sync_positions must use a FRESH account_state snapshot, not the one
+        from the top of _on_bar(). Because _on_bar runs as a create_task
+        (bar_builder.py:122), ticks can interleave during its await calls
+        and fill orders. The original snapshot from bot.py:223 predates
+        those fills, so sync_positions would see no position and wipe
+        _position_sizes — destroying the fill. Re-fetching here ensures
+        the snapshot includes any fills placed during bar processing.
+
+        See: bar_builder.py:122 (create_task), execution_engine.py:524 (sync_positions)
+        """
+        fresh_state = await self.client.get_account_state()
+        self.execution_engine.set_equity(fresh_state.total_equity)
+        await self.execution_engine.sync_positions(
+            fresh_state, self._current_prices
+        )
+
     def _positions_to_usd(self) -> Dict[str, float]:
         assert self.client is not None
         positions_usd = {}
@@ -245,10 +264,7 @@ class TradingBot:
                         "Bar skipped — daily loss limit",
                         extra={"reason": daily_check.reason},
                     )
-                    self.execution_engine.set_equity(account_state.total_equity)
-                    await self.execution_engine.sync_positions(
-                        account_state, self._current_prices
-                    )
+                    await self._fresh_sync_positions()
                     return
 
             # Run strategy
@@ -260,10 +276,7 @@ class TradingBot:
 
             if not signals:
                 logger.info("No signals generated")
-                self.execution_engine.set_equity(account_state.total_equity)
-                await self.execution_engine.sync_positions(
-                    account_state, self._current_prices
-                )
+                await self._fresh_sync_positions()
                 return
 
             logger.info(
@@ -333,11 +346,7 @@ class TradingBot:
                     )
                 )
 
-            self.execution_engine.set_equity(account_state.total_equity)
-
-            await self.execution_engine.sync_positions(
-                account_state, self._current_prices
-            )
+            await self._fresh_sync_positions()
 
             # Log position state after bar
             pos_state = {
