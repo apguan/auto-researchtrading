@@ -40,8 +40,6 @@ from ..config import get_settings
 logger = get_logger(__name__)
 
 
-# ── Shared helpers ──────────────────────────────────────────────────
-
 
 async def fetch_usdc_cross_margin_perps(
     info: Info, min_volume_24h: float = 10_000_000
@@ -160,8 +158,6 @@ async def fetch_candles_paginated(
     return candles
 
 
-# ── Live client ─────────────────────────────────────────────────────
-
 
 class HyperliquidClient:
     def __init__(self, private_key: str):
@@ -190,7 +186,6 @@ class HyperliquidClient:
         self._sz_decimals: Dict[str, int] = {}
 
     def _round_size(self, symbol: str, size: float) -> float:
-        """Round order size to the asset's szDecimals precision."""
         if symbol not in self._sz_decimals:
             meta = self._info.meta()
             for asset in meta.get("universe", []):
@@ -204,8 +199,6 @@ class HyperliquidClient:
     def _get_nonce(self) -> int:
         self._nonce_counter += 1
         return self._nonce_counter
-
-    # ── Account state ──────────────────────────────────────────────
 
     async def get_account_state(self) -> AccountState:
         result = await asyncio.to_thread(self._info.user_state, self.query_address)
@@ -259,8 +252,6 @@ class HyperliquidClient:
             positions=positions,
         )
 
-    # ── Prices ─────────────────────────────────────────────────────
-
     async def get_mid_price(self, symbol: str) -> float:
         mids = await asyncio.to_thread(self._info.all_mids)
         price_str = mids.get(symbol, "0")
@@ -270,12 +261,19 @@ class HyperliquidClient:
         mids = await asyncio.to_thread(self._info.all_mids)
         return {symbol: float(px) for symbol, px in mids.items()}
 
-    # ── Leverage ───────────────────────────────────────────────────
-
     async def set_leverage(self, symbol: str, leverage: int):
         result = await asyncio.to_thread(
             self._exchange.update_leverage, leverage, symbol, True
         )
+        if result.get("status") != "ok":
+            error_msg = result.get("response", "unknown")
+            logger.critical(
+                "Failed to set leverage",
+                extra={"symbol": symbol, "leverage": leverage, "error": error_msg},
+            )
+            raise RuntimeError(
+                f"set_leverage failed for {symbol} leverage={leverage}: {error_msg}"
+            )
         logger.info(
             "Set leverage",
             extra={"symbol": symbol, "leverage": leverage, "status": "ok"},
@@ -283,16 +281,16 @@ class HyperliquidClient:
         return result
 
     async def set_leverage_for_symbols(self, symbols: List[str], leverage: int):
+        failures: list[str] = []
         for symbol in symbols:
             try:
                 await self.set_leverage(symbol, leverage)
-            except Exception as e:
-                logger.error(
-                    "Failed to set leverage",
-                    extra={"symbol": symbol, "error": str(e)},
-                )
-
-    # ── Orders ─────────────────────────────────────────────────────
+            except RuntimeError:
+                failures.append(symbol)
+        if failures:
+            raise RuntimeError(
+                f"set_leverage failed for {len(failures)}/{len(symbols)} symbols: {', '.join(failures)}"
+            )
 
     async def place_order(
         self,
@@ -303,7 +301,22 @@ class HyperliquidClient:
         price: Optional[float] = None,
         reduce_only: bool = False,
     ) -> Order:
+        original_size = size
         size = self._round_size(symbol, size)
+        if size <= 0:
+            logger.warning(
+                "Order rejected: size rounded to zero after szDecimals",
+                extra={"symbol": symbol, "original_size": original_size},
+            )
+            return Order(
+                id=str(self._get_nonce()),
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                size=size,
+                price=price,
+                status=OrderStatus.REJECTED,
+            )
         is_buy = side == OrderSide.BUY
         slippage = 0.05  # 5% slippage for market orders
 
@@ -335,7 +348,22 @@ class HyperliquidClient:
         is_market: bool = True,
         tpsl: str = "sl",
     ) -> Order:
+        original_size = size
         size = self._round_size(symbol, size)
+        if size <= 0:
+            logger.warning(
+                "Trigger order rejected: size rounded to zero after szDecimals",
+                extra={"symbol": symbol, "original_size": original_size},
+            )
+            return Order(
+                id=str(self._get_nonce()),
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.TRIGGER,
+                size=size,
+                price=trigger_price,
+                status=OrderStatus.REJECTED,
+            )
 
         sdk_order_type: Any = {
             "trigger": {
@@ -492,8 +520,6 @@ class HyperliquidClient:
             status=OrderStatus.REJECTED,
         )
 
-    # ── Cancel ─────────────────────────────────────────────────────
-
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         try:
             result = await asyncio.to_thread(
@@ -512,8 +538,6 @@ class HyperliquidClient:
         for order in open_orders:
             await self.cancel_order(order.symbol, order.id)
         return True
-
-    # ── Open orders ────────────────────────────────────────────────
 
     async def get_open_orders(self, symbol: Optional[str] = None) -> List[Order]:
         result = await asyncio.to_thread(
@@ -560,10 +584,7 @@ class HyperliquidClient:
             )
         return orders
 
-    # ── Fills & funding history ─────────────────────────────────────
-
     async def get_user_fills(self, start_time: int, end_time: int) -> list[dict]:
-        """Get fills with closedPnl for a time window. Times in ms."""
         return await asyncio.to_thread(
             self._info.user_fills_by_time, self.query_address, start_time, end_time
         )
@@ -571,12 +592,9 @@ class HyperliquidClient:
     async def get_funding_history(
         self, start_time: int, end_time: int | None = None
     ) -> list[dict]:
-        """Get funding payments for a time window. start_time in ms."""
         return await asyncio.to_thread(
             self._info.user_funding_history, self.query_address, start_time, end_time
         )
-
-    # ── Market data ────────────────────────────────────────────────
 
     async def get_funding_rate(self, symbol: str) -> float:
         result = await asyncio.to_thread(self._info.meta_and_asset_ctxs)
