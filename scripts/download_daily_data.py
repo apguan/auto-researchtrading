@@ -21,7 +21,8 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from constants import BENCHMARK_SYMBOLS, HL_INFO_URL
+from constants import HL_INFO_URL
+from symbol_utils import discover_usdc_perps
 
 CACHE_DIR = Path.home() / ".cache" / "autotrader" / "data"
 
@@ -125,13 +126,15 @@ def main():
 
     start_str = now - timedelta(days=months * 30)
     print(f"Downloading {months} months of data: {start_str.strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}")
-    print(f"Symbols: {BENCHMARK_SYMBOLS}")
+
+    symbols = discover_usdc_perps()
+    print(f"Symbols: {symbols}")
     print(f"Cache: {CACHE_DIR}")
     print()
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    for symbol in BENCHMARK_SYMBOLS:
+    for symbol in symbols:
         filepath = CACHE_DIR / f"{symbol}_1h.parquet"
         print(f"  {symbol}: downloading candles...")
         candles = _download_hl_candles(symbol, "1h", start_ms, end_ms)

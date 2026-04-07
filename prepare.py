@@ -20,6 +20,7 @@ import requests
 
 from constants import INITIAL_CAPITAL, TAKER_FEE, SLIPPAGE_BPS
 from constants import BENCHMARK_SYMBOLS, HL_INFO_URL
+from symbol_utils import discover_usdc_perps
 
 # ---------------------------------------------------------------------------
 # Constants (fixed, do not modify)
@@ -30,40 +31,7 @@ MAX_LEVERAGE = 20  # max leverage allowed
 LOOKBACK_BARS = 500  # history buffer provided to strategy
 BAR_INTERVAL = "1h"
 
-def _discover_symbols() -> list[str]:
-    """Discover tradeable USDC cross-margin perps from Hyperliquid.
-
-    Filters: delisted, isolated-only, 24h volume < $10M.
-    Falls back to BENCHMARK_SYMBOLS on any failure.
-    """
-    try:
-        resp = requests.post(
-            HL_INFO_URL,
-            json={"type": "metaAndAssetCtxs"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        meta, asset_ctxs = resp.json()
-
-        perps: list[str] = []
-        for asset, ctx in zip(meta.get("universe", []), asset_ctxs):
-            if asset.get("isDelisted", False):
-                continue
-            if asset.get("onlyIsolated"):
-                continue
-            margin_mode = asset.get("marginMode")
-            if margin_mode in ("strictIsolated", "noCross"):
-                continue
-            vol = float(ctx.get("dayNtlVlm", 0))
-            if vol < 10_000_000:
-                continue
-            perps.append(asset["name"])
-        return sorted(perps)
-    except Exception:
-        return list(BENCHMARK_SYMBOLS)
-
-
-SYMBOLS = _discover_symbols()
+SYMBOLS = discover_usdc_perps()
 
 # Date splits (UTC timestamps)
 TRAIN_START = "2023-06-01"
