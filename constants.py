@@ -11,13 +11,12 @@ Only stdlib allowed.
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# Symbols
-# ---------------------------------------------------------------------------
-ALL_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
+ALL_SYMBOLS = [
+    "AVAX", "BTC", "ETH", "FARTCOIN", "HYPE", "kPEPE",
+    "LIT", "MON", "NEAR", "PAXG", "PUMP", "SUI",
+    "SOL", "TAO", "XPL", "XRP", "ZEC", "ZRO",
+]
 
-# Per-interval active symbol sets (each is a subset of ALL_SYMBOLS).
-# Used by strategies, data pipeline, and benchmarks.
 INTERVAL_SYMBOLS: dict[str, list[str]] = {
     "1h": ALL_SYMBOLS,
     "15m": ALL_SYMBOLS,
@@ -25,10 +24,7 @@ INTERVAL_SYMBOLS: dict[str, list[str]] = {
     "1m": ALL_SYMBOLS,
 }
 
-BENCHMARK_SYMBOLS = [
-    "BTC", "ETH", "SOL", "XRP", "HYPE",
-    "NEAR", "TAO", "ZEC",
-]
+BENCHMARK_SYMBOLS = ALL_SYMBOLS
 
 def make_equal_weights(
     symbols: list[str] | None = None,
@@ -40,49 +36,33 @@ def make_equal_weights(
     return {s: w for s in symbols}
 
 
-# ---------------------------------------------------------------------------
-# Fees & Slippage
-# ---------------------------------------------------------------------------
-MAKER_FEE = 0.0002  # 2 bps
-TAKER_FEE = 0.0005  # 5 bps
-SLIPPAGE_BPS = 25.0  # 25 bps (0.25%)
+MAKER_FEE = 0.0002
+TAKER_FEE = 0.0005
+SLIPPAGE_BPS = 25.0
 
 
-# ---------------------------------------------------------------------------
-# Hyperliquid API
-# ---------------------------------------------------------------------------
 HYPERLIQUID_API_URL = "https://api.hyperliquid.xyz"
 HYPERLIQUID_WS_URL = "wss://api.hyperliquid.xyz/ws"
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 
 
-# ---------------------------------------------------------------------------
-# Intervals & Lookback
-# ---------------------------------------------------------------------------
 INTERVAL_MINUTES: dict[str, int] = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
 VALID_INTERVALS = list(INTERVAL_MINUTES.keys())
 
-# Used by live_trading_bot/config/settings.py (production lookback)
 LOOKBACK_BARS: dict[str, int] = {
     "1h": 500,
 }
 
-# Used by data_pipeline/backtest/backtest_interval.py (backtest lookback)
 BACKTEST_LOOKBACK_BARS: dict[str, int] = {
     "1h": 500,
 }
 
 
-# ---------------------------------------------------------------------------
-# Capital
-# ---------------------------------------------------------------------------
 INITIAL_CAPITAL = 100_000.0
 BACKTEST_CAPITAL = 100_000.0
 
 
-# ---------------------------------------------------------------------------
 # PARAM_COLUMNS — DB schema for tunable strategy params
-# ---------------------------------------------------------------------------
 PARAM_COLUMNS: list[str] = [
     "SHORT_WINDOW",
     "MED_WINDOW",
@@ -121,9 +101,6 @@ INT_PARAMS: set[str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Uniform Strategy Defaults — same value across ALL intervals
-# ---------------------------------------------------------------------------
 UNIFORM_DEFAULTS: dict[str, int | float] = {
     "RSI_BULL": 50,
     "RSI_BEAR": 50,
@@ -136,9 +113,6 @@ UNIFORM_DEFAULTS: dict[str, int | float] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Per-Interval Strategy Defaults
-# ---------------------------------------------------------------------------
 # Each interval's dict merges its interval-specific params with UNIFORM_DEFAULTS.
 # Later keys override earlier keys (e.g. 1m's ATR_STOP_MULT=6.5 beats uniform 5.5).
 STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
@@ -161,7 +135,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, int | float]] = {
         "COOLDOWN_BARS": 0,
         "EXIT_CONVICTION_BARS": 2,
         "MIN_HOLD_BARS": 2,
-        # Execution-layer config (NOT in PARAM_COLUMNS — not strategy tuning)
         "MOMENTUM_VETO_THRESHOLD": 0.005,
         "REENTRY_GRACE_BARS": 3,
         "OBV_MA_PERIOD": 20,
