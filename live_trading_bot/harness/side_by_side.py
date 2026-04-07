@@ -193,7 +193,10 @@ def main():
         "--live-runs", type=int, default=1, help="Number of live instances"
     )
     parser.add_argument(
-        "--interval", default="1m", help="Bar interval (default: 1m)"
+        "--interval", default=None,
+        help="Bar interval (e.g. 1m, 15m). If omitted, inherits BAR_INTERVAL "
+             "from the environment, falling back to bot.py's default. Pass "
+             "explicitly only when you want to override the env var.",
     )
     args = parser.parse_args()
 
@@ -210,7 +213,8 @@ def main():
     print(f"Work directory: {work_dir}")
     print(f"Duration: {mode_str}")
     print(f"Instances: {args.dry_runs} dry-run + {args.live_runs} live")
-    print(f"Interval: {args.interval}")
+    interval_display = args.interval or f"{os.environ.get('BAR_INTERVAL', 'bot.py default')} (from env)"
+    print(f"Interval: {interval_display}")
     print()
 
     instances = []
@@ -228,7 +232,12 @@ def main():
         env["DRY_RUN"] = "true" if is_dry else "false"
         env["DB_PATH"] = db_path
         env["LOG_PATH"] = log_path
-        env["BAR_INTERVAL"] = args.interval
+        # Only override BAR_INTERVAL if --interval was passed explicitly.
+        # Otherwise inherit from the environment (e.g. Railway env var) so
+        # the harness doesn't silently force 1m bars when the live bot is
+        # configured for 15m.
+        if args.interval:
+            env["BAR_INTERVAL"] = args.interval
         env["ALERT_ON_TRADE"] = "true"
         env["ALERT_INSTANCE_NAME"] = name
 
