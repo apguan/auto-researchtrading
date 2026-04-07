@@ -287,6 +287,7 @@ def save_experiment_to_db(
     is_best: bool = True,
 ) -> bool:
     import os
+    import sys
     import psycopg2
     from datetime import datetime, timezone
 
@@ -309,7 +310,7 @@ def save_experiment_to_db(
             "score, status, description, "
             + param_cols
         )
-        all_placeholders = ", ".join(["%s"] * (15 + len(ACTIVE_PARAMS)))
+        all_placeholders = ", ".join(["%s"] * (16 + len(ACTIVE_PARAMS)))
 
         ret_dd_ratio = (
             total_return_pct / max_drawdown_pct
@@ -322,6 +323,7 @@ def save_experiment_to_db(
             "1h",
             ",".join(_RUNTIME_SYMBOLS),
             False,
+            is_best,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -342,7 +344,8 @@ def save_experiment_to_db(
         )
         conn.commit()
         return True
-    except Exception:
+    except Exception as e:
+        print(f"save_experiment_to_db error: {e}", file=sys.stderr)
         return False
     finally:
         if conn:
