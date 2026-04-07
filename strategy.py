@@ -16,6 +16,7 @@ ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]  # fallback for _RUNTIME_SYMBOLS init; u
 # Populated on first on_bar() call with the symbols actually in bar_data.
 # Used by save_experiment_to_db() to persist the dynamic symbol set.
 _RUNTIME_SYMBOLS: list[str] = list(ACTIVE_SYMBOLS)
+_symbols_from_backtest = False
 
 SHORT_WINDOW = 6
 MED_WINDOW = 11
@@ -66,7 +67,9 @@ class Strategy:
 
         # Track the symbols present in this backtest
         if not self._symbols_initialized:
-            _RUNTIME_SYMBOLS = sorted(bar_data.keys())
+            _RUNTIME_SYMBOLS[:] = sorted(bar_data.keys())
+            global _symbols_from_backtest
+            _symbols_from_backtest = True
             self._symbols_initialized = True
         else:
             # Accumulate any new symbols seen on later bars
@@ -274,6 +277,18 @@ def _get_current_params() -> dict[str, int | float]:
     return {k: globals()[k] for k in ACTIVE_PARAMS}
 
 
+def _get_runtime_symbols() -> list[str]:
+    if _symbols_from_backtest:
+        return _RUNTIME_SYMBOLS
+    from pathlib import Path
+    import glob
+    cache_dir = Path.home() / ".cache" / "autotrader" / "data"
+    parquets = sorted(glob.glob(str(cache_dir / "*_1h.parquet")))
+    if parquets:
+        return sorted(Path(p).stem.replace("_1h", "") for p in parquets)
+    return _RUNTIME_SYMBOLS
+
+
 def save_experiment_to_db(
     score: float,
     sharpe: float,
@@ -321,7 +336,7 @@ def save_experiment_to_db(
             datetime.now(timezone.utc).isoformat(),
             "autoresearch",
             "1h",
-            ",".join(_RUNTIME_SYMBOLS),
+            ",".join(_get_runtime_symbols()),
             False,
             is_best,
             sharpe,
