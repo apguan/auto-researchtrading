@@ -445,7 +445,11 @@ class TradingBot:
                 side=order.side.value,
                 size=order.filled_size,
                 price=order.avg_fill_price,
-                fee=order.filled_size * 0.0005,
+                # Fee = notional * taker rate. filled_size is in coins, so we
+                # must multiply by price to get USD notional. The previous
+                # formula (size * 0.0005) gave near-zero fees for low-coin-count
+                # symbols like BTC/ETH. Matches DryExchange.TAKER_FEE_BPS.
+                fee=order.filled_size * order.avg_fill_price * 0.0005,
                 pnl=pnl,
                 order_id=order.id,
             )
