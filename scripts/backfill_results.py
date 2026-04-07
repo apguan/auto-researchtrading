@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Backfill experiment results from results.tsv into param_snapshots."""
 
+import glob
 import os
 import re
 import subprocess
@@ -14,6 +15,20 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import psycopg2
+
+DATA_CACHE = Path.home() / ".cache" / "autotrader" / "data"
+
+
+def discover_symbols() -> str:
+    """Discover actual symbols from the parquet cache."""
+    parquets = sorted(glob.glob(str(DATA_CACHE / "*_1h.parquet")))
+    if not parquets:
+        return "ALL"
+    symbols = []
+    for p in parquets:
+        name = Path(p).stem.replace("_1h", "")
+        symbols.append(name)
+    return ",".join(symbols)
 
 if "SUPABASE_DB_URL" not in os.environ:
     env_file = REPO_ROOT / ".env"
@@ -84,6 +99,9 @@ def main():
     results = parse_results()
     print(f"Found {len(results)} experiments in results.tsv")
 
+    symbols = discover_symbols()
+    print(f"Symbols: {symbols}")
+
     now = datetime.now(timezone.utc).isoformat()
 
     conn = psycopg2.connect(db_url)
@@ -143,7 +161,7 @@ def main():
             ]
             for p in ACTIVE_PARAMS:
                 values.append(params.get(p, 0.0))
-            values.extend(["ALL", False, row["description"], row["score"], row["status"]])
+            values.extend([symbols, False, row["description"], row["score"], row["status"]])
 
             assert len(values) == len(all_insert_cols), \
                 f"Mismatch: {len(values)} values vs {len(all_insert_cols)} cols"
