@@ -1,0 +1,47 @@
+# Divergence Monitor — cron service
+#
+# Reference config for the `divergence-monitor` Railway service. This file is
+# NOT used directly by Railway (which uses railway.toml or per-service
+# overrides). Use this file as the source of truth when configuring the
+# service in the Railway dashboard.
+#
+# Service purpose:
+#   - Run hourly to compare live vs dry trade behavior
+#   - On divergence, alert via Telegram
+#   - On divergence, invoke headless Claude to investigate and open a PR
+#
+# To set up in Railway dashboard:
+#
+#   1. Create a new service in the autismo-bot project, point at this repo
+#   2. In the new service settings → Deploy:
+#      - Custom Start Command:
+#          uv run python scripts/monitor_divergence.py
+#      - Cron Schedule:
+#          0 * * * *          (every hour at :00)
+#      - Restart Policy:
+#          Never
+#
+#   3. Add these env vars (most can be Reference Variables to trading-bot):
+#      - SUPABASE_DB_URL          (reference from trading-bot)
+#      - TELEGRAM_BOT_TOKEN       (reference from trading-bot)
+#      - TELEGRAM_CHAT_ID         (reference from trading-bot)
+#      - ANTHROPIC_API_KEY        (NEW — get from console.anthropic.com)
+#      - GITHUB_TOKEN             (NEW — PAT with repo scope, for `gh pr create`)
+#      - GH_TOKEN                 (alias of GITHUB_TOKEN, gh CLI reads this)
+#
+#   4. Don't set DRY_RUN or BAR_INTERVAL — this service doesn't trade
+#
+# Why a separate service instead of a script in trading-bot?
+#   - Cleanly separated: trading-bot does trading, monitor does monitoring
+#   - Different start commands, different schedules
+#   - Failure of one doesn't affect the other
+#   - Cron schedule is enforced by Railway, not by us
+#
+# Why hourly?
+#   - Matches the new BAR_INTERVAL=1h
+#   - Gives one full bar of data to compare
+#   - Cheap enough to run hourly even when nothing's wrong
+
+[deploy]
+cronSchedule = "0 * * * *"
+restartPolicyType = "never"
