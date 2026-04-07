@@ -18,4 +18,7 @@ COPY . .
 RUN mkdir -p logs
 
 WORKDIR /app
-CMD ["uv", "run", "live_trading_bot/bot.py"]
+
+# No CMD by design. Each Railway service in this repo must set its own
+# "Custom Start Command" via the dashboard. See railway.toml for the
+# rationale and the list of expected commands per service.
