@@ -14,6 +14,7 @@ for Railway deployment where the process should stay up indefinitely).
 """
 
 import argparse
+import asyncio
 import os
 import signal
 import sqlite3
@@ -33,6 +34,32 @@ def _stream_output(proc, prefix):
         if text:
             print(f"[{prefix}] {text}", flush=True)
     proc.stdout.close()
+
+
+def _query_live_equity_sync() -> float | None:
+    """Query the live Hyperliquid account equity. Returns None on failure.
+
+    Used to auto-match dry-run starting capital to the real live account
+    so that comparisons between dry and live aren't distorted by 10x
+    different position sizes (the strategy is equity-aware).
+    """
+    try:
+        # Imported lazily so this script still loads if HL deps are missing
+        from live_trading_bot.config import get_private_key
+        from live_trading_bot.exchange.hyperliquid import HyperliquidClient
+
+        async def _q() -> float:
+            client = HyperliquidClient(private_key=get_private_key())
+            try:
+                state = await client.get_account_state()
+                return float(state.total_equity)
+            finally:
+                await client.close()
+
+        return asyncio.run(_q())
+    except Exception as e:
+        print(f"[harness] Failed to query live equity: {e}", flush=True)
+        return None
 
 
 def parse_duration(s: str) -> int:
@@ -215,6 +242,35 @@ def main():
     print(f"Instances: {args.dry_runs} dry-run + {args.live_runs} live")
     interval_display = args.interval or f"{os.environ.get('BAR_INTERVAL', 'bot.py default')} (from env)"
     print(f"Interval: {interval_display}")
+
+    # Auto-match dry capital to live equity unless the user explicitly set
+    # DRY_RUN_INITIAL_CAPITAL in the environment. The point: the strategy is
+    # equity-aware (position sizes scale with equity), so dry and live must
+    # start with the same capital to produce comparable behavior. Without
+    # this, dry runs at the default $10k while live runs at whatever the
+    # real account has — making any signal/PnL comparison meaningless.
+    dry_capital_override: float | None = None
+    if args.dry_runs > 0:
+        if "DRY_RUN_INITIAL_CAPITAL" in os.environ:
+            print(
+                f"Dry capital: ${float(os.environ['DRY_RUN_INITIAL_CAPITAL']):.2f} "
+                f"(from env DRY_RUN_INITIAL_CAPITAL — explicit override, "
+                f"NOT auto-matched to live)"
+            )
+        else:
+            live_equity = _query_live_equity_sync()
+            if live_equity is not None and live_equity > 0:
+                dry_capital_override = live_equity
+                print(
+                    f"Dry capital: ${dry_capital_override:.2f} "
+                    f"(auto-matched to live account equity — set "
+                    f"DRY_RUN_INITIAL_CAPITAL in env to override)"
+                )
+            else:
+                print(
+                    "Dry capital: bot.py default "
+                    "(could not query live equity, see error above)"
+                )
     print()
 
     instances = []
@@ -238,6 +294,11 @@ def main():
         # configured for 15m.
         if args.interval:
             env["BAR_INTERVAL"] = args.interval
+        # Set dry capital override on dry instances if auto-matching is on.
+        # Live instances always use real equity from the exchange and ignore
+        # this env var.
+        if is_dry and dry_capital_override is not None:
+            env["DRY_RUN_INITIAL_CAPITAL"] = str(dry_capital_override)
         env["ALERT_ON_TRADE"] = "true"
         env["ALERT_INSTANCE_NAME"] = name
 
