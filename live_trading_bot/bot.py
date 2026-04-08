@@ -82,11 +82,20 @@ class TradingBot:
             json_format=True,
         )
 
+        # Log the operational config at INFO level so a deploy is verifiable
+        # at a glance from `railway logs`. Critical for catching cases like
+        # "I bumped BAR_INTERVAL to 1h but the running container is still on
+        # 15m". Never log secrets here (no API keys, DB URLs, private keys).
         logger.info(
             "Initializing trading bot",
             extra={
                 "dry_run": self.settings.DRY_RUN,
                 "trading_pairs": self.settings.TRADING_PAIRS,
+                "bar_interval": self.settings.BAR_INTERVAL,
+                "max_leverage": self.settings.MAX_LEVERAGE,
+                "max_position_pct": self.settings.MAX_POSITION_PCT,
+                "daily_loss_limit_pct": self.settings.DAILY_LOSS_LIMIT_PCT,
+                "alert_instance_name": self.settings.ALERT_INSTANCE_NAME or "(none)",
             },
         )
 
