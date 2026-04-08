@@ -31,6 +31,7 @@ class Trade:
     pnl: Optional[float]
     strategy_signal: Optional[str] = None
     order_id: Optional[str] = None
+    dry_run: bool = False
 
 
 @dataclass

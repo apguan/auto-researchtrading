@@ -31,7 +31,8 @@ class SqliteRepository:
                 fee REAL NOT NULL,
                 pnl REAL,
                 strategy_signal TEXT,
-                order_id TEXT
+                order_id TEXT,
+                dry_run INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS signals (
@@ -55,6 +56,30 @@ class SqliteRepository:
             CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
             CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp);
         """)
+
+        # Migration: add dry_run column if it doesn't exist
+        try:
+            col_info = await self._db.execute("PRAGMA table_info(trades)")
+            cols = [row[1] async for row in col_info]
+            if "dry_run" not in cols:
+                await self._db.execute(
+                    "ALTER TABLE trades ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0"
+                )
+                # Populate from legacy order_id convention, then strip prefix
+                await self._db.execute(
+                    "UPDATE trades SET dry_run = 1 WHERE order_id LIKE '%dry%'"
+                )
+                await self._db.execute(
+                    "UPDATE trades SET order_id = REPLACE(order_id, 'dry-', '') WHERE order_id LIKE 'dry-%'"
+                )
+                await self._db.execute(
+                    "UPDATE trades SET order_id = REPLACE(order_id, 'dry-trigger-', '') WHERE order_id LIKE 'dry-trigger-%'"
+                )
+                await self._db.commit()
+                logger.info("Migrated trades table: added dry_run column, populated from order_id")
+        except Exception as e:
+            logger.warning(f"Migration check failed (non-fatal): {e}")
+
         await self._db.commit()
         logger.info("Connected to SQLite", extra={"path": self._db_path})
 
@@ -67,8 +92,8 @@ class SqliteRepository:
         assert self._db is not None
         cursor = await self._db.execute(
             """
-            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trade.timestamp.isoformat() if isinstance(trade.timestamp, datetime) else str(trade.timestamp),
@@ -80,6 +105,7 @@ class SqliteRepository:
                 trade.pnl,
                 trade.strategy_signal,
                 trade.order_id,
+                int(trade.dry_run),
             ),
         )
         await self._db.commit()
@@ -133,12 +159,12 @@ class SqliteRepository:
 
         if symbol:
             cursor = await self._db.execute(
-                "SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE timestamp >= ? AND pnl IS NOT NULL AND symbol = ?",
+                "SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE timestamp >= ? AND pnl IS NOT NULL AND symbol = ? AND dry_run = 0",
                 (today_start, symbol),
             )
         else:
             cursor = await self._db.execute(
-                "SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE timestamp >= ? AND pnl IS NOT NULL",
+                "SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE timestamp >= ? AND pnl IS NOT NULL AND dry_run = 0",
                 (today_start,),
             )
         row = await cursor.fetchone()

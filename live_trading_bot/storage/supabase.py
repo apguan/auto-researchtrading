@@ -46,8 +46,8 @@ class SupabaseRepository:
     async def insert_trade(self, trade: Trade) -> int:
         row = await self.pool.fetchrow(
             """
-            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
             """,
             trade.timestamp,
@@ -59,6 +59,7 @@ class SupabaseRepository:
             trade.pnl,
             trade.strategy_signal,
             trade.order_id,
+            trade.dry_run,
         )
         trade_id = row["id"]
         logger.debug(
@@ -109,6 +110,7 @@ class SupabaseRepository:
                 pnl=row["pnl"],
                 strategy_signal=row["strategy_signal"],
                 order_id=row["order_id"],
+                dry_run=bool(row.get("dry_run", False)),
             )
             for row in rows
         ]
@@ -202,13 +204,13 @@ class SupabaseRepository:
         )
         if symbol:
             row = await self.pool.fetchrow(
-                "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE timestamp >= $1 AND pnl IS NOT NULL AND symbol = $2",
+                "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE timestamp >= $1 AND pnl IS NOT NULL AND symbol = $2 AND dry_run = FALSE",
                 today_start,
                 symbol,
             )
         else:
             row = await self.pool.fetchrow(
-                "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE timestamp >= $1 AND pnl IS NOT NULL",
+                "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE timestamp >= $1 AND pnl IS NOT NULL AND dry_run = FALSE",
                 today_start,
             )
         return float(row["total"])
