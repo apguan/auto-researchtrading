@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
@@ -26,6 +26,11 @@ class RiskController:
 
         self.trading_enabled = True
         self.daily_start_equity: Optional[float] = None
+        # Track which UTC date the daily_start_equity belongs to. Without this,
+        # we can't tell whether the stored start equity is "today's" or stale
+        # from a previous day. Used by check_daily_loss_limit to detect day
+        # rollover and reset.
+        self.daily_start_date: Optional[date] = None
         self.last_check_time: Optional[datetime] = None
 
         self.price_history: Dict[str, List[tuple]] = {}
@@ -36,11 +41,26 @@ class RiskController:
     ) -> RiskCheckResult:
         now = datetime.now(timezone.utc)
 
-        if self.daily_start_equity is None or now.hour == 0 and now.minute == 0:
+        # Reset daily_start_equity on first run OR when we cross into a new
+        # UTC day. The previous condition (`now.hour == 0 and now.minute == 0`)
+        # only fired during the 60-second window from 00:00:00 to 00:00:59 UTC,
+        # so any check that happened later in the minute (likely with 15m+
+        # bars) would miss the reset and the bot would compare today's equity
+        # against an arbitrarily-old `daily_start_equity` forever, eventually
+        # tripping the kill switch on phantom losses.
+        if (
+            self.daily_start_equity is None
+            or self.daily_start_date is None
+            or now.date() != self.daily_start_date
+        ):
             self.daily_start_equity = account_state.total_equity
+            self.daily_start_date = now.date()
             if not self.trading_enabled:
                 self.trading_enabled = True
-                logger.info("Daily loss limit auto-reset at midnight")
+                logger.info(
+                    "Daily loss limit auto-reset on day rollover",
+                    extra={"date": now.date().isoformat()},
+                )
 
         daily_pnl_db = await self.db.get_daily_pnl()
         daily_pnl_pct = (
@@ -205,6 +225,7 @@ class RiskController:
     def enable_trading(self):
         self.trading_enabled = True
         self.daily_start_equity = None
+        self.daily_start_date = None
         logger.info("Trading re-enabled")
 
     def disable_trading(self, reason: str = "Manual disable"):
@@ -216,5 +237,6 @@ class RiskController:
 
     def reset_daily(self):
         self.daily_start_equity = None
+        self.daily_start_date = None
         self.volatility_triggered_symbols.clear()
         logger.info("Daily risk limits reset")
