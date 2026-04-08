@@ -153,6 +153,134 @@ class TestDailyLossLimitMidnightReset:
         assert rc.is_trading_enabled(), "trading_enabled must auto-reset at midnight"
 
 
+class TestDailyLossResetUsesDateNotMinute:
+    """Bug: the reset condition was `now.hour == 0 and now.minute == 0`, which
+    only fires during the 60-second window from 00:00:00 to 00:00:59 UTC. With
+    15m+ bars, the bot's check often happened at 00:01 or later, missing the
+    window entirely. The bot then carried a stale `daily_start_equity` from a
+    previous day forever, eventually tripping the kill switch on phantom losses.
+
+    Fix: track `daily_start_date` and reset whenever `now.date()` differs.
+    These tests verify that:
+    1. The reset fires at ANY time on a new UTC day, not just within the
+       first minute.
+    2. The reset does NOT fire repeatedly within the same UTC day."""
+
+    @staticmethod
+    def _make_account(equity: float) -> AccountState:
+        return AccountState(
+            wallet_address="0xTest",
+            total_equity=equity,
+            available_balance=equity,
+            margin_used=0.0,
+            unrealized_pnl=0.0,
+            positions={},
+        )
+
+    @staticmethod
+    def _make_rc():
+        mock_db = AsyncMock()
+        mock_db.get_daily_pnl = AsyncMock(return_value=0.0)
+        with patch(
+            "live_trading_bot.risk.risk_controller.get_settings",
+            return_value=Settings(DAILY_LOSS_LIMIT_PCT=0.05),
+        ):
+            return RiskController(mock_db)
+
+    @pytest.mark.asyncio
+    async def test_reset_fires_at_14_00_on_new_day(self):
+        """The fix: a check at 14:00 UTC on a new day MUST reset
+        daily_start_equity from the prior day."""
+        rc = self._make_rc()
+
+        # Simulate yesterday's stale state: kill-switched at $1041 starting equity
+        from datetime import date as _date
+        rc.daily_start_equity = 1041.0
+        rc.daily_start_date = _date(2026, 4, 7)
+        rc.trading_enabled = False  # killed yesterday
+
+        # Check today at 14:00 UTC, with current equity $969 (would still
+        # show -7% loss against the stale starting point)
+        new_day_afternoon = datetime(2026, 4, 8, 14, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = new_day_afternoon
+            result = await rc.check_daily_loss_limit(self._make_account(969.0))
+
+        assert rc.is_trading_enabled(), (
+            "Day rollover must reset trading_enabled even when checked "
+            "outside the 00:00 minute"
+        )
+        assert rc.daily_start_equity == 969.0, (
+            "daily_start_equity must reset to current equity, not carry over "
+            "from yesterday's $1041"
+        )
+        assert rc.daily_start_date.isoformat() == "2026-04-08"
+        assert result.allowed, (
+            "After reset, current equity == start equity → 0% loss → trading "
+            "should be allowed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_reset_does_not_fire_twice_same_day(self):
+        """Within the same UTC day, repeated checks must not reset
+        daily_start_equity. Otherwise the bot would lose its reference point
+        every bar and the kill switch could never trip."""
+        rc = self._make_rc()
+
+        # First check at 14:00 → captures starting equity
+        first_check = datetime(2026, 4, 8, 14, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = first_check
+            await rc.check_daily_loss_limit(self._make_account(1000.0))
+
+        assert rc.daily_start_equity == 1000.0
+
+        # Subsequent checks throughout the day on a falling equity must NOT
+        # reset the start point. They should compute losses against $1000.
+        for hour in [15, 18, 21, 23]:
+            t = datetime(2026, 4, 8, hour, 30, 0, tzinfo=timezone.utc)
+            with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+                mock_dt.now.return_value = t
+                # Equity dropping over the day
+                equity = 1000.0 - (hour - 14) * 5
+                await rc.check_daily_loss_limit(self._make_account(equity))
+
+            assert rc.daily_start_equity == 1000.0, (
+                f"daily_start_equity must NOT reset within the same day "
+                f"(check at hour={hour})"
+            )
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_no_longer_phantom_after_day_rollover(self):
+        """End-to-end: yesterday's kill switch state with stale equity should
+        clear on day rollover, and a normal small loss today should NOT
+        re-trigger it."""
+        rc = self._make_rc()
+
+        # Yesterday: kill-switched with phantom $1041 start (real losses were small)
+        from datetime import date as _date
+        rc.daily_start_equity = 1041.0
+        rc.daily_start_date = _date(2026, 4, 7)
+        rc.trading_enabled = False
+
+        # Today at 09:00 UTC, real equity is $969 (would be -7% vs stale $1041,
+        # but should be 0% vs reset start of $969)
+        morning = datetime(2026, 4, 8, 9, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = morning
+            result = await rc.check_daily_loss_limit(self._make_account(969.0))
+        assert result.allowed, "First check today should reset and allow trading"
+        assert rc.daily_start_equity == 969.0
+
+        # A few hours later, equity drops to $950 (-2% real loss). Should still
+        # be allowed since limit is 5%.
+        afternoon = datetime(2026, 4, 8, 15, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = afternoon
+            result = await rc.check_daily_loss_limit(self._make_account(950.0))
+        assert result.allowed, "Real -2% loss must not trip the 5% kill switch"
+
+
 class TestConsumeCloseInfoPreventsStalePnL:
     """Bug: after close→re-entry, the entry order read stale _last_close_* state.
     consume_close_info() returns AND clears, so the next order gets (0, 0)."""
