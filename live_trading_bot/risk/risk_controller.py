@@ -62,11 +62,21 @@ class RiskController:
                     extra={"date": now.date().isoformat()},
                 )
 
-        daily_pnl_db = await self.db.get_daily_pnl()
-        daily_pnl_pct = (
-            daily_pnl_db / self.daily_start_equity if self.daily_start_equity > 0 else 0
-        )
-
+        # Use ONLY equity_change_pct as the source of truth.
+        #
+        # We previously also queried `db.get_daily_pnl()` and took the worse
+        # of the two metrics with `min(daily_pnl_pct, equity_change_pct)`.
+        # That broke because `get_daily_pnl()` doesn't filter by live vs dry
+        # — it sums every trade in the table including dry-prefixed ones,
+        # which are written by the side_by_side dry subprocess. The live
+        # bot would then see the combined live+dry PnL and trip the kill
+        # switch on the dry bot's losses (e.g. dry lost $65, live lost $3,
+        # but the live bot saw -$68 = -7% on a $970 account and froze).
+        #
+        # Equity is the unambiguous truth: if the real Hyperliquid account
+        # value hasn't dropped, we haven't lost money. The DB-PnL check was
+        # a redundant double-check that became actively harmful once the
+        # harness started writing dry trades to the same table.
         equity_change_pct = (
             (account_state.total_equity - self.daily_start_equity)
             / self.daily_start_equity
@@ -74,7 +84,7 @@ class RiskController:
             else 0
         )
 
-        total_daily_loss_pct = min(daily_pnl_pct, equity_change_pct)
+        total_daily_loss_pct = equity_change_pct
 
         if total_daily_loss_pct < -self.settings.DAILY_LOSS_LIMIT_PCT:
             self.trading_enabled = False
