@@ -461,6 +461,7 @@ class TradingBot:
                 fee=order.filled_size * order.avg_fill_price * 0.0005,
                 pnl=pnl,
                 order_id=order.id,
+                dry_run=self.settings.DRY_RUN,
             )
         )
 

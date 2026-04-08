@@ -150,7 +150,7 @@ class DryExchange:
                 extra={"symbol": symbol, "original_size": original_size},
             )
             return Order(
-                id=f"dry-{self._get_nonce()}",
+                id=str(self._get_nonce()),
                 symbol=symbol,
                 side=side,
                 order_type=order_type,
@@ -166,7 +166,7 @@ class DryExchange:
 
         if not applied:
             return Order(
-                id=f"dry-{self._get_nonce()}",
+                id=str(self._get_nonce()),
                 symbol=symbol,
                 side=side,
                 order_type=order_type,
@@ -178,7 +178,7 @@ class DryExchange:
             )
 
         return Order(
-            id=f"dry-{self._get_nonce()}",
+            id=str(self._get_nonce()),
             symbol=symbol,
             side=side,
             order_type=order_type,
@@ -199,7 +199,7 @@ class DryExchange:
         tpsl: str = "sl",
     ) -> Order:
         return Order(
-            id=f"dry-trigger-{self._get_nonce()}",
+            id=str(self._get_nonce()),
             symbol=symbol,
             side=side,
             order_type=OrderType.TRIGGER,
