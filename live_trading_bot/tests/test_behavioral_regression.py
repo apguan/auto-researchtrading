@@ -281,6 +281,90 @@ class TestDailyLossResetUsesDateNotMinute:
         assert result.allowed, "Real -2% loss must not trip the 5% kill switch"
 
 
+class TestDailyLossIgnoresDbPnl:
+    """Bug: get_daily_pnl() summed BOTH live and dry trades from the trades
+    table without filtering by order_id prefix. The risk_controller did
+    `min(daily_pnl_pct, equity_change_pct)` so the live bot's kill switch
+    fired on the dry bot's losses (e.g. dry lost $65, live lost $3, but
+    live's risk_controller saw the combined -$68 = -7% on $970 and froze).
+
+    Fix: drop the daily_pnl_db check entirely. Equity is the source of
+    truth — if account value hasn't dropped, no money was lost. The DB
+    PnL was a redundant double-check that became actively harmful when
+    the harness started writing dry trades to the same table.
+
+    This test asserts the live bot's kill switch only fires on real
+    equity drops, not on contaminated DB PnL."""
+
+    @staticmethod
+    def _make_account(equity: float):
+        return AccountState(
+            wallet_address="0xTest",
+            total_equity=equity,
+            available_balance=equity,
+            margin_used=0.0,
+            unrealized_pnl=0.0,
+            positions={},
+        )
+
+    @staticmethod
+    def _make_rc(daily_pnl_db_value: float):
+        """Create a risk controller whose db.get_daily_pnl() returns
+        the configured value (simulating contamination from dry trades)."""
+        mock_db = AsyncMock()
+        mock_db.get_daily_pnl = AsyncMock(return_value=daily_pnl_db_value)
+        with patch(
+            "live_trading_bot.risk.risk_controller.get_settings",
+            return_value=Settings(DAILY_LOSS_LIMIT_PCT=0.05),
+        ):
+            return RiskController(mock_db)
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_does_not_fire_on_db_pnl_when_equity_unchanged(self):
+        """The exact bug we hit on 2026-04-08: live bot at $970 with no
+        equity change but the DB shows -$75 of (mostly dry) PnL. The live
+        kill switch must NOT fire because the live bot hasn't actually
+        lost any money."""
+        # DB returns -$75 (contamination from dry bot's losses)
+        rc = self._make_rc(daily_pnl_db_value=-75.0)
+
+        morning = datetime(2026, 4, 8, 2, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = morning
+            # Live bot's actual equity is $970 (unchanged from start)
+            result = await rc.check_daily_loss_limit(self._make_account(970.0))
+
+        assert result.allowed, (
+            "Kill switch must not fire when equity is unchanged, "
+            "regardless of what get_daily_pnl returns"
+        )
+        assert rc.is_trading_enabled()
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_still_fires_on_real_equity_drop(self):
+        """Sanity check: the kill switch must still trip when REAL equity
+        drops by more than the limit. We didn't break the actual safety net."""
+        # DB returns 0 (clean)
+        rc = self._make_rc(daily_pnl_db_value=0.0)
+
+        # First check at $1000 to set the starting equity
+        morning = datetime(2026, 4, 8, 9, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = morning
+            await rc.check_daily_loss_limit(self._make_account(1000.0))
+
+        # Later, equity has dropped to $940 (-6% loss, above the 5% limit)
+        afternoon = datetime(2026, 4, 8, 14, 0, 0, tzinfo=timezone.utc)
+        with patch("live_trading_bot.risk.risk_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = afternoon
+            result = await rc.check_daily_loss_limit(self._make_account(940.0))
+
+        assert not result.allowed, (
+            "-6% real equity drop should trip the 5% kill switch"
+        )
+        assert not rc.is_trading_enabled()
+
+
 class TestConsumeCloseInfoPreventsStalePnL:
     """Bug: after close→re-entry, the entry order read stale _last_close_* state.
     consume_close_info() returns AND clears, so the next order gets (0, 0)."""
