@@ -42,8 +42,20 @@ def _query_live_equity_sync() -> float | None:
     Used to auto-match dry-run starting capital to the real live account
     so that comparisons between dry and live aren't distorted by 10x
     different position sizes (the strategy is equity-aware).
+
+    The script is invoked as `python live_trading_bot/harness/side_by_side.py`,
+    which does NOT put the repo root on sys.path automatically. The lazy
+    imports below need `live_trading_bot` to be importable as a top-level
+    package, so we add the repo root to sys.path before the imports. This
+    is the same trick the bot.py invocation handles via uv's package
+    discovery, but for our standalone script we have to do it ourselves.
     """
     try:
+        # repo_root = .../live_trading_bot/harness/../..  =  .../  (repo root)
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
         # Imported lazily so this script still loads if HL deps are missing
         from live_trading_bot.config import get_private_key
         from live_trading_bot.exchange.hyperliquid import HyperliquidClient
