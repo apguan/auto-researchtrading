@@ -36,6 +36,7 @@ from live_trading_bot.storage.models import Trade, SignalRecord
 from live_trading_bot.monitoring.logger import setup_logger, get_logger
 from live_trading_bot.monitoring.alerts import Alerter
 from live_trading_bot.monitoring.metrics import MetricsTracker
+from live_trading_bot.monitoring.telegram_bot import TelegramCommandBot
 from live_trading_bot.execution.signal_state import SignalState
 from live_trading_bot.execution.execution_engine import ExecutionEngine
 from live_trading_bot.exchange.stop_manager import StopManager
@@ -61,6 +62,7 @@ class TradingBot:
         self.execution_engine: Optional[ExecutionEngine] = None
         self.stop_manager: Optional[StopManager] = None
         self.watchdog: Optional[Watchdog] = None
+        self.command_bot: Optional[TelegramCommandBot] = None
 
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -180,6 +182,14 @@ class TradingBot:
 
         if self.watchdog:
             await self.watchdog.start()
+
+        self.command_bot = TelegramCommandBot(
+            alerter=self.alerter,
+            metrics=self.metrics,
+            client=self.client,
+            db=self.db,
+        )
+        await self.command_bot.start()
 
         logger.info(
             "Bot initialized",
@@ -549,6 +559,9 @@ class TradingBot:
 
         if self.watchdog:
             await self.watchdog.stop()
+
+        if self.command_bot:
+            await self.command_bot.stop()
 
         # Stops are NOT cancelled here — they are reduce-only safety nets that
         # protect positions during restarts.  On next startup,
