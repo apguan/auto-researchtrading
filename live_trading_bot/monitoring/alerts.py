@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import httpx
 
@@ -14,6 +14,21 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
+def _format_remaining(td: timedelta) -> str:
+    total = int(td.total_seconds())
+    if total < 60:
+        return f"{total}s"
+    if total < 3600:
+        return f"{total // 60}m"
+    if total < 86400:
+        h = total // 3600
+        m = (total % 3600) // 60
+        return f"{h}h{m}m" if m else f"{h}h"
+    d = total // 86400
+    h = (total % 86400) // 3600
+    return f"{d}d{h}h" if h else f"{d}d"
+
+
 class Alerter:
     def __init__(self):
         self.settings = get_settings()
@@ -25,8 +40,52 @@ class Alerter:
         self._last_hourly_alert: Optional[datetime] = None
         self._hourly_message_queue: list = []
 
+        # Mute state for AUTOMATED alerts only. On-demand replies sent via
+        # send_telegram() bypass this entirely. _mute_until=None and
+        # _mute_indefinite=False means not muted.
+        self._mute_until: Optional[datetime] = None
+        self._mute_indefinite: bool = False
+
     async def close(self):
         await self._client.aclose()
+
+    # ----- Mute control -----
+
+    def mute(self, duration: Optional[timedelta]) -> None:
+        """Mute automated alerts. duration=None mutes indefinitely."""
+        if duration is None:
+            self._mute_indefinite = True
+            self._mute_until = None
+        else:
+            self._mute_indefinite = False
+            self._mute_until = datetime.now(timezone.utc) + duration
+
+    def unmute(self) -> None:
+        self._mute_indefinite = False
+        self._mute_until = None
+
+    def is_muted(self) -> bool:
+        if self._mute_indefinite:
+            return True
+        if self._mute_until is None:
+            return False
+        if datetime.now(timezone.utc) >= self._mute_until:
+            # Auto-clear an expired timed mute so subsequent calls don't
+            # keep recomputing the same comparison.
+            self._mute_until = None
+            return False
+        return True
+
+    def mute_status(self) -> str:
+        if self._mute_indefinite:
+            return "muted indefinitely"
+        if self._mute_until is None:
+            return "not muted"
+        remaining = self._mute_until - datetime.now(timezone.utc)
+        if remaining.total_seconds() <= 0:
+            self._mute_until = None
+            return "not muted"
+        return f"muted for {_format_remaining(remaining)}"
 
     async def send_telegram(self, message: str) -> bool:
         if not self.telegram_token or not self.telegram_chat_id:
@@ -76,6 +135,13 @@ class Alerter:
 
     async def send_alert(self, message: str, urgent: bool = False):
         if self.settings.DRY_RUN:
+            return
+
+        # Mute suppresses AUTOMATED alerts only. On-demand command responses
+        # are sent via the command bot's own client, never through send_alert,
+        # so they bypass this check by construction.
+        if self.is_muted():
+            logger.debug("Alert suppressed by mute", extra={"urgent": urgent})
             return
 
         tasks = []
