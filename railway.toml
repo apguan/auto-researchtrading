@@ -1,0 +1,23 @@
+# Shared build config for all Railway services in this repo.
+#
+# IMPORTANT: There is intentionally NO startCommand here. Each service in the
+# autismo-bot Railway project MUST set its own "Custom Start Command" in the
+# dashboard. This prevents accidents like the one on 2026-04-06 where a second
+# service (daily-cron) silently inherited the live bot start command and
+# competed with trading-bot for the same Hyperliquid account.
+#
+# Current services and the start commands they SHOULD have:
+#   - trading-bot → uv run live_trading_bot/harness/side_by_side.py --interval 15m --dry-runs 1 --live-runs 1
+#   - daily-cron  → uv run data_pipeline/daily_tune.py --workers 4 --subsample 4
+#
+# The Dockerfile also has no default CMD, so a service with no custom Start
+# Command will exit immediately. This is intentional — better to fail loudly
+# than silently run the wrong thing.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

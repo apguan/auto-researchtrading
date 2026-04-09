@@ -1,20 +1,23 @@
 """Volatility-regime adaptive strategy — ported from agent-cli."""
+
 import math
 import numpy as np
-from prepare import Signal, PortfolioState, BarData
+from prepare import Signal, PortfolioState
+from constants import BENCHMARK_SYMBOLS
 
 VOL_WINDOW = 48
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL"]
+ACTIVE_SYMBOLS = BENCHMARK_SYMBOLS
 
 # Regime params: (vol_threshold, spread_bps, size_mult, stop_mult)
 REGIMES = [
-    (0.30, 10, 1.5, 0.02),    # I_low: tight spread, big size, tight stop
-    (0.60, 25, 1.0, 0.03),    # II_normal
-    (1.00, 50, 0.5, 0.05),    # III_high: wide spread, small size
+    (0.30, 10, 1.5, 0.02),  # I_low: tight spread, big size, tight stop
+    (0.60, 25, 1.0, 0.03),  # II_normal
+    (1.00, 50, 0.5, 0.05),  # III_high: wide spread, small size
     (float("inf"), 100, 0.2, 0.08),  # IV_extreme: survival
 ]
 HYSTERESIS = 3
 BASE_SIZE_PCT = 0.08
+
 
 class Strategy:
     def __init__(self):
@@ -67,7 +70,6 @@ class Strategy:
             mid = bd.close
             current_pos = portfolio.positions.get(symbol, 0.0)
 
-            half_spread = mid * spread_bps / 10000
             size = equity * BASE_SIZE_PCT * size_mult
 
             # Simple momentum signal within regime-adaptive framework

@@ -1,16 +1,19 @@
 """Avellaneda-Stoikov inventory-aware market maker — ported from agent-cli."""
+
 import math
 import numpy as np
-from prepare import Signal, PortfolioState, BarData
+from prepare import Signal, PortfolioState
+from constants import BENCHMARK_SYMBOLS
 
 GAMMA = 0.1
 K = 1.5
 POSITION_SIZE_PCT = 0.08
 MAX_INVENTORY_PCT = 0.25
-MIN_SPREAD_BPS = 20.0       # wider for hourly bars (not tick-level)
+MIN_SPREAD_BPS = 20.0  # wider for hourly bars (not tick-level)
 MAX_SPREAD_BPS = 500.0
 VOL_WINDOW = 30
-ACTIVE_SYMBOLS = ["BTC", "ETH", "SOL"]
+ACTIVE_SYMBOLS = BENCHMARK_SYMBOLS
+
 
 class Strategy:
     def __init__(self):
@@ -50,11 +53,6 @@ class Strategy:
             if GAMMA > 0:
                 spread += (2.0 / GAMMA) * math.log(1.0 + GAMMA / K)
 
-            half_spread = max(mid * MIN_SPREAD_BPS / 10000, min(spread / 2, mid * MAX_SPREAD_BPS / 10000))
-
-            bid_price = r_price - half_spread
-            ask_price = r_price + half_spread
-
             # Size scaled by inventory utilization
             utilization = abs(current_pos) / max_inv if max_inv > 0 else 0
             size = equity * POSITION_SIZE_PCT * max(0.1, 1.0 - utilization)
@@ -73,7 +71,8 @@ class Strategy:
             if current_pos != 0 and symbol in self.entry_prices:
                 entry = self.entry_prices[symbol]
                 pnl = (mid - entry) / entry
-                if current_pos < 0: pnl = -pnl
+                if current_pos < 0:
+                    pnl = -pnl
                 if pnl < -0.03:
                     target = 0.0
 

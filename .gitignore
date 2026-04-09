@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 .cache/
 .venv/
+.env
+*.db
+*.log
+logs/
+data_pipeline/logs/
+data_pipeline/tuning_results/
+data_pipeline/backtest_data/
+tune_results*.txt
