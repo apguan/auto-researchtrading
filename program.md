@@ -128,6 +128,41 @@ turnover_penalty = max(0, annual_turnover/capital - 500) * 0.001
 Hard cutoffs: <10 trades → -999, >50% drawdown → -999, lost >50% → -999
 ```
 
+## Council Mode (adversarial convergence-breaking)
+
+After **5 consecutive experiments with no improvement**, enter Council Mode to break out of local optima.
+
+### Step 1: Generate Diverse Proposals
+
+Read current `strategy.py` and full results.tsv. Generate **3-5 proposals**, each from a distinct philosophy (change only one parameter per proposal):
+- **Simplification** — remove a component; test if performance holds
+- **Contrarian** — opposite of current approach (momentum → mean-reversion, etc.)
+- **Regime-shift** — what would change if market conditions shifted?
+- **Scale-change** — different timeframe, asset weighting, or position size
+- **Radical** — completely different approach to the problem
+
+### Step 2: Anonymize & Peer Review
+
+Label as "Proposal A/B/C/D/E". Evaluate each: pros, cons, overfitting risk, regime robustness, complexity cost. Output `FINAL RANKING: 1. Proposal X, 2. Proposal Y...`
+
+### Step 3: Execute & Cascade
+
+- Apply only #1. Run eval, keep/discard as normal.
+- If #1 fails → try #2, then #3.
+- If ALL fail → log `COUNCIL_PASS: strategy survived adversarial review (N proposals tested)` in results.tsv. Resume with fresh research directions.
+- If any succeeds → log `COUNCIL_ACCEPT: Proposal X adopted (philosophy)` in results.tsv. Continue from new baseline.
+
+### Council Log
+
+Maintain `council_log.md` (append-only). Each entry:
+```
+## Council Session #N — Experiment <exp> (score: <value>)
+Trigger: 5 no-improvement experiments (<start> through <end>)
+Proposals: A=Simplification(...), B=Contrarian(...), C=Radical(...)
+Ranking: 1. B, 2. A, 3. C — rationale: ...
+Outcome: COUNCIL_ACCEPT Proposal B / COUNCIL_PASS
+```
+
 ## NEVER STOP
 
 Once the experiment loop has begun, do NOT pause to ask the human if you should continue. You are autonomous. If you run out of ideas, think harder. The loop runs until interrupted.
