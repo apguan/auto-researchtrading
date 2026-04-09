@@ -69,51 +69,109 @@ def mock_client():
     return client
 
 
-class TestReversalRespectsCooldown:
-    """Reversals re-enter after cooldown expires (not immediately).
-    The pending_reversal survives across ticks until cooldown clears."""
+class TestReversalReEntersImmediately:
+    """End-to-end test for the signal-reversal flow: when the strategy flips
+    direction, the bot must close the existing position AND re-enter the new
+    direction on the very next tick — bypassing the bar-based cooldown.
+
+    Bug context (2026-04-08): in production with COOLDOWN_BARS=2, the
+    reversal close fired correctly, but the re-entry never happened. The
+    `_pending_reversal` flag was being held idle by `is_in_cooldown` for
+    COOLDOWN_BARS bars after the close, and during that wait window other
+    state changes (sync_positions re-hydration, new strategy signals) caused
+    the pending intent to be lost. By the time the cooldown cleared, the bot
+    had moved on and the second half of the flip never executed. ETH is the
+    canonical example: closed long at 15:00 UTC, never re-entered short,
+    sat unprotected through three bars while dry/backtest correctly held
+    the short.
+
+    What this test tells us: a long→short reversal results in TWO orders
+    on consecutive ticks (close, then short entry), with the short entry
+    happening at the SAME bar_count as the close — not COOLDOWN_BARS later.
+    The bar-based cooldown's job is to debounce fresh entries, not to gate
+    the second half of an explicit flip.
+    """
 
     @pytest.mark.asyncio
-    async def test_reversal_re_enters_after_cooldown(self, settings, signal_state, mock_client):
+    async def test_reversal_re_enters_on_next_tick(self, settings, signal_state, mock_client):
         engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
         engine.set_equity(100000.0)
 
+        # Bar 1: enter long.
         signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, bar_count=1)
         entry_order = await engine.on_tick("BTC", 50000.0)
         assert entry_order is not None
         assert engine._last_executed_direction["BTC"] == 1
 
+        # Wait out the ms cooldown so the next tick isn't blocked by it.
         time.sleep(0.05)
-
         mock_client.place_order.reset_mock()
 
+        # Bar 2: strategy flips to short. The close fires on this tick.
         signal_state.set_direction("BTC", -1, -0.03, 50.0, 49000.0, bar_count=2)
-        engine.clear_pending_reversal("BTC")
-
+        # Make the close return a SELL fill (closing a long).
+        mock_client.place_order = AsyncMock(
+            return_value=_make_filled_order(side=OrderSide.SELL, size=0.1, price=49000.0)
+        )
         close_order = await engine.on_tick("BTC", 49000.0)
         assert close_order is not None
-        assert engine._pending_reversal.get("BTC") == -1
+        assert engine._pending_reversal.get("BTC") == -1, (
+            "Close should set pending_reversal to the target direction"
+        )
+        assert engine._position_sizes.get("BTC", 0.0) == 0.0, (
+            "Engine should be flat after the close"
+        )
 
+        # Wait out the ms cooldown.
         time.sleep(0.05)
-        mock_client.place_order.reset_mock()
 
-        # Still in cooldown — re-entry blocked
-        reentry_blocked = await engine.on_tick("BTC", 49000.0)
-        assert reentry_blocked is None, "Reversal should be blocked by cooldown"
-
-        # Advance bar_count past cooldown (COOLDOWN_BARS=2, exited at bar 2, clear at bar 4)
-        signal_state.bar_count = 4
-        signal_state.set_direction("BTC", -1, -0.03, 50.0, 49000.0, bar_count=4)
-
+        # Now mock a SELL fill for the new short entry (at the same bar_count=2).
+        # The bar-based cooldown WAS just set (last_exit_bar == bar_count), so
+        # is_in_cooldown(BTC, 2) is True. Pre-fix this would have blocked the
+        # entry. Post-fix the entry must fire because pending_dir is set.
         mock_client.place_order = AsyncMock(
             return_value=_make_filled_order(side=OrderSide.SELL, size=0.1, price=49000.0)
         )
 
         reentry_order = await engine.on_tick("BTC", 49000.0)
-        assert reentry_order is not None, "Reversal should re-enter after cooldown expires"
+
+        assert reentry_order is not None, (
+            "Pending reversal must re-enter on the very next tick, NOT wait "
+            "for COOLDOWN_BARS bars to elapse"
+        )
+        assert mock_client.place_order.called
         call_kwargs = mock_client.place_order.call_args.kwargs
-        assert call_kwargs["side"] == OrderSide.SELL
+        assert call_kwargs["side"] == OrderSide.SELL, "Re-entry must be a short"
         assert engine._last_executed_direction["BTC"] == -1
+        assert engine._pending_reversal.get("BTC") is None, (
+            "pending_reversal must be cleared after the re-entry fills"
+        )
+
+    @pytest.mark.asyncio
+    async def test_fresh_entry_still_respects_cooldown(self, settings, signal_state, mock_client):
+        """Cooldown still applies to fresh entries — only pending reversals
+        bypass it. This guards against the fix being too broad.
+
+        What this test tells us: a fresh entry (no pending_reversal set) at
+        the same bar as a recent close is still blocked by COOLDOWN_BARS.
+        The cooldown's debouncing purpose for fresh entries is preserved.
+        """
+        engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
+        engine.set_equity(100000.0)
+
+        # Simulate a recent exit at bar 2 (e.g. from a stop or signal_flat),
+        # WITHOUT setting pending_reversal — that's the difference.
+        signal_state.bar_count = 2
+        signal_state.record_exit("BTC", bar_count=2)
+
+        # Same bar, fresh long signal arrives (e.g. strategy decides go long
+        # after our exit was triggered by something else). With COOLDOWN_BARS=2
+        # this should be blocked.
+        signal_state.set_direction("BTC", 1, 0.05, 50.0, 50000.0, bar_count=2)
+
+        order = await engine.on_tick("BTC", 50000.0)
+        assert order is None, "Fresh entries must still respect bar cooldown"
+        assert not mock_client.place_order.called
 
 
 class TestDailyLossLimitMidnightReset:
