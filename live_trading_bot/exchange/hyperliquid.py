@@ -165,10 +165,14 @@ class HyperliquidClient:
 
         self.account = Account.from_key(private_key)
         self.wallet_address = self.account.address
-        # API wallets don't hold equity — query the main wallet for account state.
-        # If HYPERLIQUID_MAIN_WALLET is unset, the PK is the main wallet's.
+        raw_vault = self.settings.HYPERLIQUID_VAULT_ADDRESS or None
+        if raw_vault and raw_vault.startswith("HL:"):
+            raw_vault = raw_vault[3:]
+        self.vault_address = raw_vault
         self.query_address = (
-            self.settings.HYPERLIQUID_MAIN_WALLET or self.wallet_address
+            self.vault_address
+            or self.settings.HYPERLIQUID_MAIN_WALLET
+            or self.wallet_address
         )
 
         base_url = self.settings.HYPERLIQUID_API_URL
@@ -177,6 +181,7 @@ class HyperliquidClient:
         self._exchange = Exchange(
             wallet=self.account,
             base_url=base_url,
+            vault_address=self.vault_address,
             account_address=self.query_address,
         )
 

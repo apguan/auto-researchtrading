@@ -121,6 +121,9 @@ class Settings:
     # wallet (which doesn't hold equity itself). If unset, defaults to the
     # address derived from the private key (correct when the PK is the main wallet's).
     HYPERLIQUID_MAIN_WALLET: str = ""
+    # Vault/sub-account address. When set, orders are placed on behalf of this
+    # vault and account state (positions, equity, fills) is queried from it.
+    HYPERLIQUID_VAULT_ADDRESS: str = ""
 
     DB_PATH: str = "trading_bot.db"
     SUPABASE_DB_URL: str = ""
@@ -184,6 +187,9 @@ class Settings:
 
         if val := os.getenv("HYPERLIQUID_MAIN_WALLET"):
             settings.HYPERLIQUID_MAIN_WALLET = val
+
+        if val := os.getenv("HYPERLIQUID_VAULT_ADDRESS"):
+            settings.HYPERLIQUID_VAULT_ADDRESS = val
 
         if val := os.getenv("DRY_RUN"):
             settings.DRY_RUN = val.lower() in ("true", "1", "yes")

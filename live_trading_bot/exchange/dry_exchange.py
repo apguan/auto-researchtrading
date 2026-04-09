@@ -29,8 +29,14 @@ class DryExchange:
         self.settings = get_settings()
         self.account = Account.from_key(private_key)
         self.wallet_address = self.account.address
+        raw_vault = self.settings.HYPERLIQUID_VAULT_ADDRESS or None
+        if raw_vault and raw_vault.startswith("HL:"):
+            raw_vault = raw_vault[3:]
+        self.vault_address = raw_vault
         self.query_address = (
-            self.settings.HYPERLIQUID_MAIN_WALLET or self.wallet_address
+            self.vault_address
+            or self.settings.HYPERLIQUID_MAIN_WALLET
+            or self.wallet_address
         )
 
         self._info = Info(
