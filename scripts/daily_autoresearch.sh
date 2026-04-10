@@ -96,7 +96,7 @@ log "Data ready."
 DATE_TAG=$(date -u +%b%d | tr '[:upper:]' '[:lower:]')
 BRANCH="autotrader/${DATE_TAG}"
 
-HARNESS_BRANCH="harness"
+HARNESS_BRANCH="main"
 
 if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
     log "Branch $BRANCH exists — checking out."

@@ -164,7 +164,7 @@ class Settings:
         if val := os.getenv("TRADING_PAIRS"):
             settings.TRADING_PAIRS = val.split(",")
         else:
-            settings.TRADING_PAIRS = discover_usdc_perps()
+            settings.TRADING_PAIRS = discover_usdc_perps(top_n=None)
         settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
 
         if val := os.getenv("MAX_LEVERAGE"):
