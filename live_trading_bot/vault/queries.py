@@ -1,10 +1,23 @@
 """Read-only vault info queries wrapping the Hyperliquid Info API."""
 
+import sys
+from pathlib import Path
 from typing import Optional
 
 from hyperliquid.info import Info
 
-from .types import VaultDetails, VaultEquity, VaultFollower, VaultPosition
+_LIVE_BOT_ROOT = Path(__file__).resolve().parent.parent
+if str(_LIVE_BOT_ROOT) not in sys.path:
+    sys.path.append(str(_LIVE_BOT_ROOT))
+
+import importlib.util
+_spec = importlib.util.spec_from_file_location("exchange.types", _LIVE_BOT_ROOT / "exchange" / "types.py")
+_types_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_types_mod)
+Position = _types_mod.Position
+parse_user_state_positions = _types_mod.parse_user_state_positions
+
+from .types import VaultDetails, VaultEquity, VaultFollower
 
 
 class VaultQueries:
@@ -49,35 +62,9 @@ class VaultQueries:
             return None
         return self.get_vault_details(equities[0].vault_address, user)
 
-    def get_vault_positions(self, vault_address: str) -> list[VaultPosition]:
+    def get_vault_positions(self, vault_address: str) -> list[Position]:
         raw = self._info.user_state(vault_address)
-        positions = []
-        for pos_data in raw.get("assetPositions", []):
-            pos_info = pos_data.get("position", {})
-            coin = pos_info.get("coin")
-            if not coin:
-                continue
-            size = float(pos_info.get("szi", 0))
-            if size == 0:
-                continue
-            entry_price = float(pos_info.get("entryPx", 0))
-            unrealized_pnl = float(pos_info.get("unrealizedPnl", 0))
-            leverage_raw = pos_info.get("leverage", {})
-            leverage = (
-                float(leverage_raw.get("value", 1))
-                if isinstance(leverage_raw, dict)
-                else float(leverage_raw)
-            )
-            positions.append(
-                VaultPosition(
-                    coin=coin,
-                    size=size,
-                    entry_price=entry_price,
-                    unrealized_pnl=unrealized_pnl,
-                    leverage=leverage,
-                )
-            )
-        return positions
+        return parse_user_state_positions(raw)
 
     def is_vault(self, address: str) -> bool:
         raw = self._info.user_role(address)

@@ -35,12 +35,3 @@ class VaultFollower:
 class VaultEquity:
     vault_address: str
     equity: float
-
-
-@dataclass
-class VaultPosition:
-    coin: str
-    size: float
-    entry_price: float
-    unrealized_pnl: float
-    leverage: float

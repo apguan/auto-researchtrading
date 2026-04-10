@@ -1,5 +1,7 @@
 """Facade combining vault queries and actions into a single manager."""
 
+import sys
+from pathlib import Path
 from typing import Optional
 
 from eth_account import Account
@@ -7,9 +9,19 @@ from eth_account.signers.local import LocalAccount
 from hyperliquid.info import Info
 from hyperliquid.utils.constants import MAINNET_API_URL
 
+_LIVE_BOT_ROOT = Path(__file__).resolve().parent.parent
+if str(_LIVE_BOT_ROOT) not in sys.path:
+    sys.path.append(str(_LIVE_BOT_ROOT))
+
+import importlib.util
+_spec = importlib.util.spec_from_file_location("exchange.types", _LIVE_BOT_ROOT / "exchange" / "types.py")
+_types_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_types_mod)
+Position = _types_mod.Position
+
 from .actions import VaultActions
 from .queries import VaultQueries
-from .types import VaultDetails, VaultFollower, VaultPosition
+from .types import VaultDetails, VaultFollower
 
 
 class VaultManager:
@@ -41,7 +53,7 @@ class VaultManager:
             return None
         return self._queries.get_vault_details(self._vault_address)
 
-    def portfolio(self) -> list[VaultPosition]:
+    def portfolio(self) -> list[Position]:
         if not self._vault_address:
             return []
         return self._queries.get_vault_positions(self._vault_address)

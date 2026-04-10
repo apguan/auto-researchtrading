@@ -33,6 +33,7 @@ from .types import (
     PositionSide,
     AccountState,
     Candle,
+    parse_user_state_positions,
 )
 from ..monitoring.logger import get_logger
 from ..config import get_settings
@@ -208,45 +209,12 @@ class HyperliquidClient:
     async def get_account_state(self) -> AccountState:
         result = await asyncio.to_thread(self._info.user_state, self.query_address)
 
-        positions: Dict[str, Position] = {}
+        positions = {
+            p.symbol: p for p in parse_user_state_positions(result)
+        }
         margin_summary = result.get("marginSummary", {})
         account_value = float(margin_summary.get("accountValue", 0))
         available_balance = float(margin_summary.get("availableBalance", 0))
-
-        for pos_data in result.get("assetPositions", []):
-            pos_info = pos_data.get("position", {})
-            coin = pos_info.get("coin")
-            if not coin:
-                continue
-
-            size = float(pos_info.get("szi", 0))
-            if size == 0:
-                continue
-
-            side = PositionSide.LONG if size > 0 else PositionSide.SHORT
-            entry_price = float(pos_info.get("entryPx", 0))
-            mark_price = float(pos_info.get("markPx", 0))
-            unrealized_pnl = float(pos_info.get("unrealizedPnl", 0))
-            leverage_raw = pos_info.get("leverage", {})
-            leverage_val = (
-                float(leverage_raw.get("value", 1))
-                if isinstance(leverage_raw, dict)
-                else float(leverage_raw)
-            )
-            margin_used = float(pos_info.get("marginUsed", 0))
-            liq_price = pos_info.get("liquidationPx")
-
-            positions[coin] = Position(
-                symbol=coin,
-                side=side,
-                size=abs(size),
-                entry_price=entry_price,
-                current_price=mark_price,
-                unrealized_pnl=unrealized_pnl,
-                leverage=leverage_val,
-                margin_used=margin_used,
-                liquidation_price=float(liq_price) if liq_price else None,
-            )
 
         return AccountState(
             wallet_address=self.query_address,
