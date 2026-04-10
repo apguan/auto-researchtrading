@@ -41,9 +41,6 @@ def _resolve_vault(args_vault: str | None, env_vault: str, require: bool = False
     return address
 
 
-# ── Subcommand handlers ──────────────────────────────────────────────
-
-
 def cmd_status(args):
     """Show vault details."""
     private_key, env_vault, base_url = _load_env()
@@ -177,7 +174,6 @@ def cmd_portfolio(args):
         print("No open positions.")
         return
 
-    # Header
     header = f"{'COIN':<12} {'SIDE':<8} {'SIZE':>14} {'ENTRY':>14} {'UNREALIZED PnL':>16} {'LEVERAGE':>10}"
     print(header)
     print("-" * len(header))
@@ -243,9 +239,6 @@ def cmd_list(args):
         print(f"{name:<30} {addr:<44} ${equity:>13.2f}")
 
 
-# ── CLI entry point ──────────────────────────────────────────────────
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vault.cli",
@@ -253,35 +246,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # status
     p_status = sub.add_parser("status", help="Show vault details")
     p_status.add_argument("--vault", default=None, help="Vault address (or set HYPERLIQUID_VAULT_ADDRESS)")
 
-    # create
     p_create = sub.add_parser("create", help="Create a new vault")
     p_create.add_argument("--name", required=True, help="Vault name (min 3 chars)")
     p_create.add_argument("--desc", required=True, help="Vault description (min 10 chars)")
     p_create.add_argument("--usd", type=float, default=100, help="Initial deposit in USD (min 100, default 100)")
 
-    # deposit
     p_deposit = sub.add_parser("deposit", help="Deposit USDC into vault")
     p_deposit.add_argument("--usd", type=float, required=True, help="Amount to deposit")
     p_deposit.add_argument("--vault", default=None, help="Vault address (or set HYPERLIQUID_VAULT_ADDRESS)")
 
-    # withdraw
     p_withdraw = sub.add_parser("withdraw", help="Withdraw USDC from vault")
     p_withdraw.add_argument("--usd", type=float, required=True, help="Amount to withdraw")
     p_withdraw.add_argument("--vault", default=None, help="Vault address (or set HYPERLIQUID_VAULT_ADDRESS)")
 
-    # portfolio
     p_portfolio = sub.add_parser("portfolio", help="Show vault's open positions")
     p_portfolio.add_argument("--vault", default=None, help="Vault address (or set HYPERLIQUID_VAULT_ADDRESS)")
 
-    # followers
     p_followers = sub.add_parser("followers", help="List vault followers")
     p_followers.add_argument("--vault", default=None, help="Vault address (or set HYPERLIQUID_VAULT_ADDRESS)")
 
-    # list
     sub.add_parser("list", help="List all vaults you have deposits in")
 
     return parser

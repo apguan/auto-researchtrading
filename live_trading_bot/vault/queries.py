@@ -22,7 +22,7 @@ class VaultQueries:
             vault_address: Hex address of the vault.
             user: Optional user address — when provided, returns follower-specific state.
         """
-        payload: dict = {
+        payload = {
             "type": "vaultDetails",
             "vaultAddress": vault_address,
         }
@@ -33,11 +33,10 @@ class VaultQueries:
         return self._parse_vault_details(raw)
 
     def get_user_vault_equities(self, user: str) -> list[VaultEquity]:
-        """Get all vault equity positions for a user."""
         raw = self._info.user_vault_equities(user)
         if not isinstance(raw, list):
             return []
-        equities: list[VaultEquity] = []
+        equities = []
         for item in raw:
             addr = item.get("vault", "")
             equity = float(item.get("equity", 0))
@@ -45,16 +44,14 @@ class VaultQueries:
         return equities
 
     def get_user_vault_details(self, user: str) -> Optional[VaultDetails]:
-        """Get vault details for the first vault a user has equity in."""
         equities = self.get_user_vault_equities(user)
         if not equities:
             return None
         return self.get_vault_details(equities[0].vault_address, user)
 
     def get_vault_positions(self, vault_address: str) -> list[VaultPosition]:
-        """Get current open positions held by a vault."""
         raw = self._info.user_state(vault_address)
-        positions: list[VaultPosition] = []
+        positions = []
         for pos_data in raw.get("assetPositions", []):
             pos_info = pos_data.get("position", {})
             coin = pos_info.get("coin")
@@ -83,16 +80,11 @@ class VaultQueries:
         return positions
 
     def is_vault(self, address: str) -> bool:
-        """Check if an address is a vault."""
         raw = self._info.user_role(address)
         if isinstance(raw, dict):
             role = raw.get("role", "")
             return role == "vault"
         return False
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse_vault_details(raw: dict) -> VaultDetails:

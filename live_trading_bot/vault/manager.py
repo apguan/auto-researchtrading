@@ -36,24 +36,17 @@ class VaultManager:
         )
         self._vault_address = vault_address
 
-    # ------------------------------------------------------------------
-    # Read operations
-    # ------------------------------------------------------------------
-
     def status(self) -> Optional[VaultDetails]:
-        """Get details for the configured vault."""
         if not self._vault_address:
             return None
         return self._queries.get_vault_details(self._vault_address)
 
     def portfolio(self) -> list[VaultPosition]:
-        """Get current positions held by the configured vault."""
         if not self._vault_address:
             return []
         return self._queries.get_vault_positions(self._vault_address)
 
     def followers(self) -> list[VaultFollower]:
-        """Get followers of the configured vault."""
         if not self._vault_address:
             return []
         # Fetch vaultDetails WITHOUT user param to get the full follower list.
@@ -68,7 +61,6 @@ class VaultManager:
         return self._parse_followers(raw)
 
     def equity(self) -> float:
-        """Get the vault's total account value (equity)."""
         if not self._vault_address:
             return 0.0
         state = self._info.user_state(self._vault_address)
@@ -76,7 +68,6 @@ class VaultManager:
         return float(margin.get("accountValue", 0))
 
     def list_user_vaults(self) -> list[VaultDetails]:
-        """List all vaults the wallet user has deposits in."""
         equities = self._queries.get_user_vault_equities(self._wallet.address)
         vaults: list[VaultDetails] = []
         for eq in equities:
@@ -94,12 +85,7 @@ class VaultManager:
         return vaults
 
     def is_vault_mode(self) -> bool:
-        """True if a vault address is configured."""
         return self._vault_address is not None
-
-    # ------------------------------------------------------------------
-    # Write operations
-    # ------------------------------------------------------------------
 
     def create(
         self, name: str, description: str, initial_usd: float
@@ -119,10 +105,6 @@ class VaultManager:
             raise ValueError("No vault address configured")
         return self._actions.withdraw(self._vault_address, usd)
 
-    # ------------------------------------------------------------------
-    # Utility
-    # ------------------------------------------------------------------
-
     @staticmethod
     def usd_to_micros(usd: float) -> int:
         """Convert USD to micro-USDC (6 decimals)."""
@@ -132,10 +114,6 @@ class VaultManager:
     def micros_to_usd(micros: int) -> float:
         """Convert micro-USDC (6 decimals) to USD."""
         return micros / 1_000_000
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse_followers(raw: dict) -> list[VaultFollower]:
