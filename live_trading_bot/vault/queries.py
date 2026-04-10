@@ -8,14 +8,9 @@ from hyperliquid.info import Info
 
 _LIVE_BOT_ROOT = Path(__file__).resolve().parent.parent
 if str(_LIVE_BOT_ROOT) not in sys.path:
-    sys.path.append(str(_LIVE_BOT_ROOT))
+    sys.path.insert(0, str(_LIVE_BOT_ROOT))
 
-import importlib.util
-_spec = importlib.util.spec_from_file_location("exchange.types", _LIVE_BOT_ROOT / "exchange" / "types.py")
-_types_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_types_mod)
-Position = _types_mod.Position
-parse_user_state_positions = _types_mod.parse_user_state_positions
+from exchange.types import Position, parse_user_state_positions
 
 from .types import VaultDetails, VaultEquity, VaultFollower
 
@@ -66,6 +61,14 @@ class VaultQueries:
         raw = self._info.user_state(vault_address)
         return parse_user_state_positions(raw)
 
+    def get_vault_followers(self, vault_address: str) -> list[VaultFollower]:
+        """Fetch the full follower list for a vault (without user param)."""
+        raw = self._info.post(
+            "/info",
+            {"type": "vaultDetails", "vaultAddress": vault_address},
+        )
+        return self._parse_followers(raw)
+
     def is_vault(self, address: str) -> bool:
         raw = self._info.user_role(address)
         if isinstance(raw, dict):
@@ -95,3 +98,21 @@ class VaultQueries:
             max_withdrawable=float(raw.get("maxWithdrawable", 0)),
             max_distributable=float(raw.get("maxDistributable", 0)),
         )
+
+    @staticmethod
+    def _parse_followers(raw: dict) -> list[VaultFollower]:
+        """Parse follower list from a vaultDetails raw response."""
+        followers: list[VaultFollower] = []
+        for f in raw.get("followers", []):
+            followers.append(
+                VaultFollower(
+                    user=f.get("user", ""),
+                    vault_equity=float(f.get("vaultEquity", 0)),
+                    pnl=float(f.get("pnl", 0)),
+                    all_time_pnl=float(f.get("allTimePnl", 0)),
+                    days_following=int(f.get("daysFollowing", 0)),
+                    vault_entry_time=f.get("vaultEntryTime"),
+                    lockup_until=f.get("lockupUntil"),
+                )
+            )
+        return followers

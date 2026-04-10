@@ -56,14 +56,14 @@ def cmd_status(args):
     # Equity comes from userState (already in USD), not from vaultDetails
     equity = manager.equity()
 
-    print(f"Vault: {getattr(vault, 'name', 'N/A')}")
-    print(f"Address: {getattr(vault, 'vault_address', vault_address)}")
-    print(f"Leader: {getattr(vault, 'leader', 'N/A')}")
-    print(f"Description: {getattr(vault, 'description', 'N/A')}")
+    print(f"Vault: {vault.name}")
+    print(f"Address: {vault.vault_address}")
+    print(f"Leader: {vault.leader}")
+    print(f"Description: {vault.description}")
     print(f"Equity: ${equity:,.2f}")
-    print(f"APR: {getattr(vault, 'apr', 'N/A')}")
-    print(f"Closed: {getattr(vault, 'is_closed', False)}")
-    print(f"Deposits allowed: {getattr(vault, 'allow_deposits', True)}")
+    print(f"APR: {vault.apr}")
+    print(f"Closed: {vault.is_closed}")
+    print(f"Deposits allowed: {vault.allow_deposits}")
 
 
 def cmd_create(args):
@@ -73,18 +73,6 @@ def cmd_create(args):
     name = args.name
     desc = args.desc
     initial_usd = args.usd
-
-    if len(name) < 3:
-        print("Error: vault name must be at least 3 characters", file=sys.stderr)
-        sys.exit(1)
-
-    if len(desc) < 10:
-        print("Error: vault description must be at least 10 characters", file=sys.stderr)
-        sys.exit(1)
-
-    if initial_usd < 100:
-        print("Error: initial deposit must be at least 100 USD", file=sys.stderr)
-        sys.exit(1)
 
     print(f"Creating vault: {name}")
     print(f"Description: {desc}")
@@ -179,13 +167,13 @@ def cmd_portfolio(args):
     print("-" * len(header))
 
     for pos in positions:
-        coin = getattr(pos, "coin", "?")
-        size = getattr(pos, "size", 0)
-        entry = getattr(pos, "entry_price", 0)
+        coin = pos.symbol
+        size = pos.size
+        entry = pos.entry_price
         # Info API returns unrealizedPnl in USD — no micros conversion needed
-        pnl = float(getattr(pos, "unrealized_pnl", 0))
-        leverage = getattr(pos, "leverage", 0)
-        side = "LONG" if size >= 0 else "SHORT"
+        pnl = float(pos.unrealized_pnl)
+        leverage = pos.leverage
+        side = "LONG" if pos.side.value == "long" else "SHORT"
 
         print(f"{coin:<12} {side:<8} {size:>14.6f} {entry:>14.2f} {pnl:>16.2f} {leverage:>10.1f}x")
 
@@ -207,13 +195,8 @@ def cmd_followers(args):
     print("-" * len(header))
 
     for f in followers:
-        user = getattr(f, "user", "?")
         # Info API returns vaultEquity and pnl in USD — no micros conversion needed
-        equity = float(getattr(f, "vault_equity", 0))
-        pnl = float(getattr(f, "pnl", getattr(f, "all_time_pnl", 0)))
-        days = getattr(f, "days_following", 0)
-
-        print(f"{user:<44} ${equity:>13.2f} ${pnl:>13.2f} {days:>8d}")
+        print(f"{f.user:<44} ${f.vault_equity:>13.2f} ${f.pnl:>13.2f} {f.days_following:>8d}")
 
 
 def cmd_list(args):
@@ -232,11 +215,8 @@ def cmd_list(args):
     print("-" * len(header))
 
     for v in vaults:
-        name = getattr(v, "name", "?")
-        addr = getattr(v, "vault_address", "?")
         # Equity from user_vault_equities is already in USD
-        equity = float(getattr(v, "total_equity", 0))
-        print(f"{name:<30} {addr:<44} ${equity:>13.2f}")
+        print(f"{v.name:<30} {v.vault_address:<44} ${v.total_equity:>13.2f}")
 
 
 def build_parser() -> argparse.ArgumentParser:

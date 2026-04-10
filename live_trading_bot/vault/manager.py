@@ -11,13 +11,9 @@ from hyperliquid.utils.constants import MAINNET_API_URL
 
 _LIVE_BOT_ROOT = Path(__file__).resolve().parent.parent
 if str(_LIVE_BOT_ROOT) not in sys.path:
-    sys.path.append(str(_LIVE_BOT_ROOT))
+    sys.path.insert(0, str(_LIVE_BOT_ROOT))
 
-import importlib.util
-_spec = importlib.util.spec_from_file_location("exchange.types", _LIVE_BOT_ROOT / "exchange" / "types.py")
-_types_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_types_mod)
-Position = _types_mod.Position
+from exchange.types import Position
 
 from .actions import VaultActions
 from .queries import VaultQueries
@@ -61,16 +57,7 @@ class VaultManager:
     def followers(self) -> list[VaultFollower]:
         if not self._vault_address:
             return []
-        # Fetch vaultDetails WITHOUT user param to get the full follower list.
-        # Passing a user param returns follower-specific state for that user only.
-        raw = self._info.post(
-            "/info",
-            {
-                "type": "vaultDetails",
-                "vaultAddress": self._vault_address,
-            },
-        )
-        return self._parse_followers(raw)
+        return self._queries.get_vault_followers(self._vault_address)
 
     def equity(self) -> float:
         if not self._vault_address:
@@ -86,13 +73,9 @@ class VaultManager:
             details = self._queries.get_vault_details(eq.vault_address, self._wallet.address)
             # Populate total_equity from user_vault_equities (already in USD)
             details.total_equity = eq.equity
-            # Get follower count from the raw vaultDetails response
-            raw = self._info.post(
-                "/info",
-                {"type": "vaultDetails", "vaultAddress": eq.vault_address},
-            )
-            followers_list = raw.get("followers", [])
-            details.num_followers = len(followers_list) if isinstance(followers_list, list) else 0
+            # Get follower count from the vaultDetails followers array
+            followers = self._queries.get_vault_followers(eq.vault_address)
+            details.num_followers = len(followers)
             vaults.append(details)
         return vaults
 
@@ -126,21 +109,3 @@ class VaultManager:
     def micros_to_usd(micros: int) -> float:
         """Convert micro-USDC (6 decimals) to USD."""
         return micros / 1_000_000
-
-    @staticmethod
-    def _parse_followers(raw: dict) -> list[VaultFollower]:
-        """Parse follower list from a vaultDetails raw response."""
-        followers: list[VaultFollower] = []
-        for f in raw.get("followers", []):
-            followers.append(
-                VaultFollower(
-                    user=f.get("user", ""),
-                    vault_equity=float(f.get("vaultEquity", 0)),
-                    pnl=float(f.get("pnl", 0)),
-                    all_time_pnl=float(f.get("allTimePnl", 0)),
-                    days_following=int(f.get("daysFollowing", 0)),
-                    vault_entry_time=f.get("vaultEntryTime"),
-                    lockup_until=f.get("lockupUntil"),
-                )
-            )
-        return followers
