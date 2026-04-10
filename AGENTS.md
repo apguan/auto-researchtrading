@@ -119,7 +119,7 @@ The experiment loop (from `program.md`):
 **What it does:**
 
 1. Downloads fresh 6 months of 1h candle data from Hyperliquid (clears cache first)
-2. Creates/checkout a dated branch (`autotrader/apr04` etc.) from `feat/auto_tuning`
+2. Creates/checkout a dated branch (`autotrader/apr04` etc.) from `main`
 3. Runs experiments in batches via `opencode run` — each batch is an autonomous agent session
 4. Every experiment is saved to DB (both PASS and FAIL)
 5. Every experiment is reverted after saving (strategy.py returns to harness state)
