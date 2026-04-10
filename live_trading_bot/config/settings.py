@@ -125,6 +125,10 @@ class Settings:
     # vault and account state (positions, equity, fills) is queried from it.
     HYPERLIQUID_VAULT_ADDRESS: str = ""
 
+    # Vault creation settings (used by vault CLI, not by the trading bot)
+    VAULT_NAME: str = ""
+    VAULT_DESCRIPTION: str = ""
+
     DB_PATH: str = "trading_bot.db"
     SUPABASE_DB_URL: str = ""
     LOG_PATH: str = "logs/bot.log"
@@ -190,6 +194,12 @@ class Settings:
 
         if val := os.getenv("HYPERLIQUID_VAULT_ADDRESS"):
             settings.HYPERLIQUID_VAULT_ADDRESS = val
+
+        if val := os.getenv("VAULT_NAME"):
+            settings.VAULT_NAME = val
+
+        if val := os.getenv("VAULT_DESCRIPTION"):
+            settings.VAULT_DESCRIPTION = val
 
         if val := os.getenv("DRY_RUN"):
             settings.DRY_RUN = val.lower() in ("true", "1", "yes")

@@ -191,6 +191,12 @@ class TradingBot:
         )
         await self.command_bot.start()
 
+        if self.settings.HYPERLIQUID_VAULT_ADDRESS:
+            raw_vault = self.settings.HYPERLIQUID_VAULT_ADDRESS
+            if raw_vault.startswith("HL:"):
+                raw_vault = raw_vault[3:]
+            logger.info("Vault mode enabled", extra={"vault_address": raw_vault})
+
         logger.info(
             "Bot initialized",
             extra={
