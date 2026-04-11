@@ -79,6 +79,8 @@ class DataStreamer:
 
     async def _load_historical_data(self, client: Exchange):
         logger.info("Loading historical data...")
+        # Batch-fetch all funding rates once
+        funding_rates = await client.get_all_funding_rates() if client else {}
 
         for symbol in self.symbols:
             try:
@@ -86,6 +88,7 @@ class DataStreamer:
                     symbol=symbol,
                     interval=self.settings.BAR_INTERVAL,
                     limit=self.settings.LOOKBACK_BARS,
+                    funding_rates=funding_rates,
                 )
                 self.bar_builder.add_historical_candles(symbol, candles)
 
@@ -131,10 +134,11 @@ class DataStreamer:
 
     async def _subscribe(self):
         assert self._ws is not None
-        for symbol in self.symbols:
-            subscription = {"method": "subscribe", "subscription": {"type": "allMids"}}
-            await self._ws.send(json.dumps(subscription))
+        # Subscribe to allMids once (global channel)
+        subscription = {"method": "subscribe", "subscription": {"type": "allMids"}}
+        await self._ws.send(json.dumps(subscription))
 
+        for symbol in self.symbols:
             subscription = {
                 "method": "subscribe",
                 "subscription": {"type": "l2Book", "coin": symbol},
@@ -224,17 +228,18 @@ class DataStreamer:
     async def _fetch_funding_rates(self):
         if not self._client:
             return
-        for symbol in self.symbols:
-            try:
-                rate = await self._client.get_funding_rate(symbol)
+        try:
+            rates = await self._client.get_all_funding_rates()
+            for symbol in self.symbols:
+                rate = rates.get(symbol, 0.0)
                 self.bar_builder.on_tick(
                     symbol, self.latest_prices.get(symbol, 0.0), funding_rate=rate
                 )
-            except Exception as e:
-                logger.warning(
-                    "Failed to fetch funding rate",
-                    extra={"symbol": symbol, "error": str(e)},
-                )
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch funding rates",
+                extra={"error": str(e)},
+            )
 
     async def _on_symbol_bar_complete(self, symbol: str, candle: Candle):
         """Fire the bar callback immediately for each symbol independently."""

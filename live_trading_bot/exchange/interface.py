@@ -60,6 +60,8 @@ class Exchange(Protocol):
 
     async def get_funding_rate(self, symbol: str) -> float: ...
 
+    async def get_all_funding_rates(self) -> Dict[str, float]: ...
+
     async def get_recent_candles(
         self,
         symbol: str,
@@ -67,6 +69,7 @@ class Exchange(Protocol):
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
         limit: int = 500,
+        funding_rates: Optional[Dict[str, float]] = None,
     ) -> List[Candle]: ...
 
     async def close(self) -> None: ...

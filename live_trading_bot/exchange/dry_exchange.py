@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 from eth_account import Account
 from hyperliquid.info import Info
 
+from .hyperliquid import _parse_all_funding_rates, _attach_funding_to_last_candle
+
 from .types import (
     AccountState,
     Candle,
@@ -334,14 +336,11 @@ class DryExchange:
 
     async def get_funding_rate(self, symbol: str) -> float:
         result = await asyncio.to_thread(self._info.meta_and_asset_ctxs)
-        if isinstance(result, list) and len(result) > 1:
-            meta = result[0]
-            asset_ctxs = result[1]
-            for i, coin_info in enumerate(meta.get("universe", [])):
-                if coin_info.get("name") == symbol:
-                    if i < len(asset_ctxs):
-                        return float(asset_ctxs[i].get("funding", 0))
-        return 0.0
+        return _parse_all_funding_rates(result).get(symbol, 0.0)
+
+    async def get_all_funding_rates(self) -> Dict[str, float]:
+        result = await asyncio.to_thread(self._info.meta_and_asset_ctxs)
+        return _parse_all_funding_rates(result)
 
     async def get_recent_candles(
         self,
@@ -350,28 +349,12 @@ class DryExchange:
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
         limit: int = 500,
+        funding_rates: Optional[Dict[str, float]] = None,
     ) -> List[Candle]:
         candles = await fetch_candles_paginated(
             self._info, symbol, interval, start_time, end_time, limit
         )
-        if candles:
-            try:
-                current_funding = await self.get_funding_rate(symbol)
-                candles[-1] = Candle(
-                    symbol=candles[-1].symbol,
-                    timestamp=candles[-1].timestamp,
-                    open=candles[-1].open,
-                    high=candles[-1].high,
-                    low=candles[-1].low,
-                    close=candles[-1].close,
-                    volume=candles[-1].volume,
-                    funding_rate=current_funding,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to fetch funding rate for candle",
-                    extra={"symbol": symbol, "error": str(e)},
-                )
+        _attach_funding_to_last_candle(candles, symbol, funding_rates, self.get_funding_rate)
         return candles
 
     async def close(self) -> None:
