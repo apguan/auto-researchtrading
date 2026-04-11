@@ -15,6 +15,7 @@ for Railway deployment where the process should stay up indefinitely).
 
 import argparse
 import asyncio
+import asyncpg
 import os
 import signal
 import sqlite3
@@ -24,6 +25,7 @@ import tempfile
 import threading
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -86,8 +88,47 @@ def parse_duration(s: str) -> int:
     return int(s)
 
 
-def extract_signals(db_path: str) -> list[dict]:
-    """Extract signals from a bot's SQLite database."""
+def _supabase_url() -> str | None:
+    """Return SUPABASE_DB_URL if set, else None."""
+    return os.environ.get("SUPABASE_DB_URL")
+
+
+def _query_supabase_sync(query: str, *args) -> list[dict]:
+    """Run a single read-only query against Supabase synchronously."""
+    url = _supabase_url()
+    if not url:
+        return []
+    try:
+        async def _run():
+            conn = await asyncpg.connect(url)
+            try:
+                rows = await conn.fetch(query, *args)
+                return [dict(r) for r in rows]
+            finally:
+                await conn.close()
+
+        return asyncio.run(_run())
+    except Exception as e:
+        print(f"  [harness] Supabase query error: {e}", flush=True)
+        return []
+
+
+def extract_signals(db_path: str, since: datetime | None = None) -> list[dict]:
+    """Extract signals — from Supabase if configured, otherwise local SQLite."""
+    if _supabase_url():
+        if since:
+            rows = _query_supabase_sync(
+                "SELECT timestamp, symbol, target_position, current_position "
+                "FROM signals WHERE timestamp >= $1 ORDER BY timestamp, symbol",
+                since,
+            )
+        else:
+            rows = _query_supabase_sync(
+                "SELECT timestamp, symbol, target_position, current_position "
+                "FROM signals ORDER BY timestamp, symbol"
+            )
+        return rows
+    # SQLite fallback
     if not os.path.exists(db_path):
         return []
     conn = sqlite3.connect(db_path)
@@ -100,8 +141,22 @@ def extract_signals(db_path: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def extract_trades(db_path: str) -> list[dict]:
-    """Extract trades from a bot's SQLite database."""
+def extract_trades(db_path: str, since: datetime | None = None) -> list[dict]:
+    """Extract trades — from Supabase if configured, otherwise local SQLite."""
+    if _supabase_url():
+        if since:
+            rows = _query_supabase_sync(
+                "SELECT timestamp, symbol, side, size, price "
+                "FROM trades WHERE timestamp >= $1 ORDER BY timestamp, symbol",
+                since,
+            )
+        else:
+            rows = _query_supabase_sync(
+                "SELECT timestamp, symbol, side, size, price "
+                "FROM trades ORDER BY timestamp, symbol"
+            )
+        return rows
+    # SQLite fallback
     if not os.path.exists(db_path):
         return []
     conn = sqlite3.connect(db_path)
@@ -287,6 +342,9 @@ def main():
 
     instances = []
 
+    # Record start time so Supabase queries can scope to this session only.
+    harness_start = datetime.now(timezone.utc)
+
     for i in range(args.dry_runs + args.live_runs):
         is_dry = i < args.dry_runs
         name = f"dry_{i}" if is_dry else f"live_{i - args.dry_runs}"
@@ -366,8 +424,17 @@ def main():
                 secs = elapsed % 60
                 counts = []
                 for inst in instances:
-                    sigs = extract_signals(inst["db_path"])
-                    trades = extract_trades(inst["db_path"])
+                    if _supabase_url():
+                        # Supabase mode: all instances share one DB.
+                        # Trades can be split by dry_run, signals are aggregate.
+                        sigs = extract_signals(inst["db_path"], since=harness_start)
+                        trades = extract_trades(
+                            inst["db_path"],
+                            since=harness_start,
+                        )
+                    else:
+                        sigs = extract_signals(inst["db_path"])
+                        trades = extract_trades(inst["db_path"])
                     last = sigs[-1]["timestamp"][11:16] if sigs else "--:--"
                     counts.append(f"{inst['name']}={len(sigs)}sig/{len(trades)}trd(last:{last})")
                 print(f"  [{mins}m{secs:02d}s] {', '.join(counts)}", flush=True)
@@ -392,8 +459,12 @@ def main():
     print("\nAll instances stopped.\n")
 
     for inst in instances:
-        inst["signals"] = extract_signals(inst["db_path"])
-        inst["trades"] = extract_trades(inst["db_path"])
+        if _supabase_url():
+            inst["signals"] = extract_signals(inst["db_path"], since=harness_start)
+            inst["trades"] = extract_trades(inst["db_path"], since=harness_start)
+        else:
+            inst["signals"] = extract_signals(inst["db_path"])
+            inst["trades"] = extract_trades(inst["db_path"])
 
     compare_instances(instances)
 
