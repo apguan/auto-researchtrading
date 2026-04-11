@@ -32,7 +32,8 @@ class SqliteRepository:
                 pnl REAL,
                 strategy_signal TEXT,
                 order_id TEXT,
-                dry_run INTEGER NOT NULL DEFAULT 0
+                dry_run INTEGER NOT NULL DEFAULT 0,
+                snapshot_id INTEGER REFERENCES param_snapshots(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS signals (
@@ -77,6 +78,12 @@ class SqliteRepository:
                 )
                 await self._db.commit()
                 logger.info("Migrated trades table: added dry_run column, populated from order_id")
+            if "snapshot_id" not in cols:
+                await self._db.execute(
+                    "ALTER TABLE trades ADD COLUMN snapshot_id INTEGER REFERENCES param_snapshots(id) ON DELETE SET NULL"
+                )
+                await self._db.commit()
+                logger.info("Migrated trades table: added snapshot_id column")
         except Exception as e:
             logger.warning(f"Migration check failed (non-fatal): {e}")
 
@@ -92,8 +99,8 @@ class SqliteRepository:
         assert self._db is not None
         cursor = await self._db.execute(
             """
-            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run, snapshot_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trade.timestamp.isoformat() if isinstance(trade.timestamp, datetime) else str(trade.timestamp),
@@ -106,6 +113,7 @@ class SqliteRepository:
                 trade.strategy_signal,
                 trade.order_id,
                 int(trade.dry_run),
+                trade.snapshot_id,
             ),
         )
         await self._db.commit()
