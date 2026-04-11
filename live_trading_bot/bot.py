@@ -15,18 +15,23 @@ import argparse
 import asyncio
 import signal
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+import pandas as pd
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
+from strategy_utils import calc_atr
+
 from live_trading_bot.config import get_settings
 from live_trading_bot.config.settings import Settings
 from live_trading_bot.exchange import create_exchange, Exchange
-from live_trading_bot.exchange.types import AccountState, Candle
+from live_trading_bot.exchange.types import AccountState, Candle, OrderSide, OrderType
 from live_trading_bot.data.streamer import DataStreamer
 from live_trading_bot.adapter.ensemble import EnsembleStrategy
 from live_trading_bot.risk.risk_controller import RiskController
@@ -233,9 +238,7 @@ class TradingBot:
 
         self._bar_count += 1
 
-        import time as _time
-
-        now = _time.time()
+        now = time.time()
         if now - self._last_heartbeat >= 600:
             self._last_heartbeat = now
             logger.info(
@@ -488,8 +491,6 @@ class TradingBot:
                 return atr
 
         try:
-            import pandas as pd
-            from strategy_utils import calc_atr
             histories = self.data_streamer.get_all_histories()
             candles = histories.get(symbol, [])
             if len(candles) >= 20:
@@ -607,7 +608,6 @@ async def main():
             assert bot.client is not None
             await bot.client.cancel_all_orders()
             account_state = await bot.client.get_account_state()
-            from live_trading_bot.exchange.types import OrderSide, OrderType
 
             for sym, pos in account_state.positions.items():
                 side = OrderSide.SELL if pos.side.value == "long" else OrderSide.BUY
