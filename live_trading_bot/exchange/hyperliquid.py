@@ -40,7 +40,7 @@ from ..config import get_settings
 logger = get_logger(__name__)
 
 
-def _attach_funding_to_last_candle(
+async def _attach_funding_to_last_candle(
     candles: List[Candle],
     symbol: str,
     funding_rates: Optional[Dict[str, float]],
@@ -52,7 +52,7 @@ def _attach_funding_to_last_candle(
         if funding_rates is not None:
             current_funding = funding_rates.get(symbol, 0.0)
         else:
-            current_funding = client_funding_fn(symbol)
+            current_funding = await client_funding_fn(symbol)
         candles[-1] = Candle(
             symbol=candles[-1].symbol,
             timestamp=candles[-1].timestamp,
@@ -661,7 +661,7 @@ class HyperliquidClient:
         candles = await fetch_candles_paginated(
             self._info, symbol, interval, start_time, end_time, limit
         )
-        _attach_funding_to_last_candle(candles, symbol, funding_rates, self.get_funding_rate)
+        await _attach_funding_to_last_candle(candles, symbol, funding_rates, self.get_funding_rate)
         return candles
 
     async def get_usdc_cross_margin_perps(

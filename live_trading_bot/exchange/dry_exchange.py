@@ -360,7 +360,7 @@ class DryExchange:
         candles = await fetch_candles_paginated(
             self._info, symbol, interval, start_time, end_time, limit
         )
-        _attach_funding_to_last_candle(candles, symbol, funding_rates, self.get_funding_rate)
+        await _attach_funding_to_last_candle(candles, symbol, funding_rates, self.get_funding_rate)
         return candles
 
     async def close(self) -> None:
