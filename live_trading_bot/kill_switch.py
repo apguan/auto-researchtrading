@@ -26,7 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from live_trading_bot.config import get_private_key  # noqa: E402
+from live_trading_bot.config import get_private_key, get_settings  # noqa: E402
 from live_trading_bot.exchange import (  # noqa: E402
     OrderSide,
     OrderType,
@@ -249,7 +249,8 @@ async def _record_to_db(
                 strategy_signal="kill_switch",
                 order_id=r["order_id"],
                 dry_run=is_dry_run,
-                snapshot_id=None,
+                snapshot_id=get_settings().active_snapshot_id,
+                wallet_address=get_settings().query_address,
             )
         )
 
@@ -301,7 +302,7 @@ async def main() -> None:
             return
 
         # 7. Get confirmation
-        if not skip_confirm and not is_dry_run:
+        if not skip_confirm:
             try:
                 answer = input("  Close all positions and cancel all orders? [yes/no] ")
                 if answer.strip().lower() != "yes":
