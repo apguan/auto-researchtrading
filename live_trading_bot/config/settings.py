@@ -142,6 +142,14 @@ class Settings:
     DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
     active_snapshot_id: Optional[int] = None
 
+    @property
+    def query_address(self) -> str:
+        """Resolve the operational address (vault > main wallet > empty string)."""
+        vault = self.HYPERLIQUID_VAULT_ADDRESS
+        if vault and vault.startswith("HL:"):
+            vault = vault[3:]
+        return vault or self.HYPERLIQUID_MAIN_WALLET or ""
+
     ENTRY_SLIPPAGE_PCT: float = 0.02
     EXECUTION_COOLDOWN_MS: int = 5000
 

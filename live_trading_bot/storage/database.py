@@ -46,8 +46,8 @@ class Database:
     async def insert_trade(self, trade: Trade) -> int:
         row = await self.pool.fetchrow(
             """
-            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run, snapshot_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run, snapshot_id, wallet_address)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id
             """,
             trade.timestamp,
@@ -61,6 +61,7 @@ class Database:
             trade.order_id,
             trade.dry_run,
             trade.snapshot_id,
+            trade.wallet_address,
         )
         trade_id = row["id"]
         logger.debug(
@@ -113,6 +114,7 @@ class Database:
                 order_id=row["order_id"],
                 dry_run=bool(row.get("dry_run", False)),
                 snapshot_id=row.get("snapshot_id"),
+                wallet_address=row.get("wallet_address"),
             )
             for row in rows
         ]
