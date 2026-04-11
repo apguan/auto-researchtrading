@@ -287,7 +287,9 @@ def _apply_db_params(settings: Settings) -> None:
         settings.SYMBOL_WEIGHTS = make_equal_weights(trading_pairs)
 
         try:
-            high_volume_symbols = set(discover_usdc_perps(min_volume_24h=10_000_000))
+            high_volume_symbols = set(
+                discover_usdc_perps(min_volume_24h=10_000_000, top_n=None)
+            )
             before_count = len(settings.TRADING_PAIRS)
             settings.TRADING_PAIRS = [s for s in settings.TRADING_PAIRS if s in high_volume_symbols]
             filtered_count = before_count - len(settings.TRADING_PAIRS)
