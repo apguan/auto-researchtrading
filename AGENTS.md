@@ -15,6 +15,12 @@ Instructions for AI agents working with this codebase.
 | Start live bot (dry) | `cd live_trading_bot && DRY_RUN=true uv run bot.py` |
 | Start live bot (real) | `cd live_trading_bot && DRY_RUN=false uv run bot.py` |
 | PnL check | `cd live_trading_bot && uv run pnl.py` |
+| Create vault | `cd live_trading_bot && uv run python -m vault.cli create --name "NAME" --desc "DESCRIPTION" --usd 100` |
+| Vault status | `cd live_trading_bot && uv run python -m vault.cli status` |
+| Deposit to vault | `cd live_trading_bot && uv run python -m vault.cli deposit --usd 100` |
+| Withdraw from vault | `cd live_trading_bot && uv run python -m vault.cli withdraw --usd 50` |
+| Vault portfolio | `cd live_trading_bot && uv run python -m vault.cli portfolio` |
+| Vault followers | `cd live_trading_bot && uv run python -m vault.cli followers` |
 
 ## Prerequisites
 
@@ -214,6 +220,45 @@ sqlite3 trading_bot.db "SELECT * FROM trades ORDER BY timestamp DESC LIMIT 10;"
 # Daily PnL
 uv run pnl.py              # Today
 uv run pnl.py 7d           # Last 7 days
+```
+
+## Vault Management
+
+### Creating a Vault
+
+Vaults are managed trading accounts on Hyperliquid. Creating a vault costs 100 USDC (gas fee) + minimum 100 USDC initial deposit. The vault leader receives 10% of profits and must maintain ≥5% ownership.
+
+```bash
+cd live_trading_bot
+uv run python -m vault.cli create --name "My Strategy Vault" --desc "Automated momentum strategy" --usd 500
+```
+
+### Vault-Driven Trading
+
+To trade on behalf of a vault, set `HYPERLIQUID_VAULT_ADDRESS` in your environment. The bot will place all orders under the vault's account:
+
+```bash
+export HYPERLIQUID_VAULT_ADDRESS=0xYourVaultAddress
+cd live_trading_bot && DRY_RUN=true uv run bot.py
+```
+
+### Managing Deposits/Withdrawals
+
+```bash
+# Check vault status
+uv run python -m vault.cli status
+
+# Deposit USDC (from your personal account into the vault)
+uv run python -m vault.cli deposit --usd 100
+
+# Withdraw USDC (from the vault back to your personal account)
+uv run python -m vault.cli withdraw --usd 50
+
+# View open positions
+uv run python -m vault.cli portfolio
+
+# View followers
+uv run python -m vault.cli followers
 ```
 
 ## Dynamic Symbol Flow

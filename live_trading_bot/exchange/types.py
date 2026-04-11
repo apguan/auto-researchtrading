@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict
+from typing import Dict, List, Optional
 
 
 class OrderSide(Enum):
@@ -68,6 +68,46 @@ class Position:
     @property
     def notional_value(self) -> float:
         return abs(self.size) * self.current_price
+
+
+def parse_user_state_positions(raw_state: dict) -> List[Position]:
+    """Parse positions from a userState API response into Position objects."""
+    positions: List[Position] = []
+    for pos_data in raw_state.get("assetPositions", []):
+        pos_info = pos_data.get("position", {})
+        coin = pos_info.get("coin")
+        if not coin:
+            continue
+
+        size = float(pos_info.get("szi", 0))
+        if size == 0:
+            continue
+
+        side = PositionSide.LONG if size > 0 else PositionSide.SHORT
+        entry_price = float(pos_info.get("entryPx", 0))
+        mark_price = float(pos_info.get("markPx", 0))
+        unrealized_pnl = float(pos_info.get("unrealizedPnl", 0))
+        leverage_raw = pos_info.get("leverage", {})
+        leverage_val = (
+            float(leverage_raw.get("value", 1))
+            if isinstance(leverage_raw, dict)
+            else float(leverage_raw)
+        )
+        margin_used = float(pos_info.get("marginUsed", 0))
+        liq_price = pos_info.get("liquidationPx")
+
+        positions.append(Position(
+            symbol=coin,
+            side=side,
+            size=abs(size),
+            entry_price=entry_price,
+            current_price=mark_price,
+            unrealized_pnl=unrealized_pnl,
+            leverage=leverage_val,
+            margin_used=margin_used,
+            liquidation_price=float(liq_price) if liq_price else None,
+        ))
+    return positions
 
 
 @dataclass
