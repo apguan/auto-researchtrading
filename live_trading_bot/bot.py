@@ -198,23 +198,15 @@ class TradingBot:
             urgent=True,
         )
 
-    async def _fresh_sync_positions(self) -> None:
-        """Re-fetch account state and sync execution engine positions.
-
-        sync_positions must use a FRESH account_state snapshot, not the one
-        from the top of _on_bar(). Because _on_bar runs as a create_task
-        (bar_builder.py:122), ticks can interleave during its await calls
-        and fill orders. The original snapshot from bot.py:223 predates
-        those fills, so sync_positions would see no position and wipe
-        _position_sizes — destroying the fill. Re-fetching here ensures
-        the snapshot includes any fills placed during bar processing.
-
-        See: bar_builder.py:122 (create_task), execution_engine.py:524 (sync_positions)
-        """
-        fresh_state = await self.client.get_account_state()
-        self.execution_engine.set_equity(fresh_state.total_equity)
+    async def _fresh_sync_positions(
+        self, account_state: Optional[AccountState] = None
+    ) -> None:
+        assert self.client is not None
+        if account_state is None:
+            account_state = await self.client.get_account_state()
+        self.execution_engine.set_equity(account_state.total_equity)
         await self.execution_engine.sync_positions(
-            fresh_state, self._current_prices
+            account_state, self._current_prices
         )
 
     def _positions_to_usd(self) -> Dict[str, float]:
@@ -289,7 +281,7 @@ class TradingBot:
                         "Bar skipped — daily loss limit",
                         extra={"reason": daily_check.reason},
                     )
-                    await self._fresh_sync_positions()
+                    await self._fresh_sync_positions(account_state)
                     return
 
             signals = self.strategy.on_bar(
@@ -300,7 +292,7 @@ class TradingBot:
 
             if not signals:
                 logger.info("No signals generated")
-                await self._fresh_sync_positions()
+                await self._fresh_sync_positions(account_state)
                 return
 
             logger.info(
@@ -486,9 +478,35 @@ class TradingBot:
             await self.stop_manager.cancel_stop(symbol)
 
     def _get_current_atr(self, symbol: str) -> float:
-        if not self.strategy:
-            return 0.0
-        return self.strategy.get_atr_at_entry(symbol)
+        atr = self.signal_state.signal_atr.get(symbol, 0.0)
+        if atr > 0:
+            return atr
+
+        if self.strategy:
+            atr = self.strategy.get_atr_at_entry(symbol)
+            if atr > 0:
+                return atr
+
+        try:
+            import pandas as pd
+            from strategy_utils import calc_atr
+            histories = self.data_streamer.get_all_histories()
+            candles = histories.get(symbol, [])
+            if len(candles) >= 20:
+                df = pd.DataFrame([{
+                    "high": c.high, "low": c.low, "close": c.close,
+                } for c in candles])
+                atr = calc_atr(df, 14)
+                if atr and atr > 0:
+                    return atr
+        except Exception:
+            pass
+
+        price = self._current_prices.get(symbol, 0.0)
+        if price > 0:
+            return price * 0.02
+
+        return 0.0
 
     async def _check_hourly_summary(self, account_state: AccountState):
         assert self.metrics is not None
