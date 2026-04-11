@@ -25,8 +25,8 @@ LONG_WINDOW = 48
 EMA_FAST = 3
 EMA_SLOW = 27
 RSI_PERIOD = 7
-RSI_BULL = 38
-RSI_BEAR = 62
+RSI_BULL = 50
+RSI_BEAR = 50
 RSI_OVERBOUGHT = 74
 RSI_OVERSOLD = 26
 
@@ -136,7 +136,10 @@ class Strategy:
 
             # BB width: low percentile = compression = pending breakout
             bb_pctile = calc_bb_width_pctile(closes, BB_PERIOD)
-            bb_compressed = bb_pctile < 90
+            bb_compressed = bb_pctile < 90  # Below 90th percentile = compressed
+            # Directional: compressed only votes with the EMA trend
+            bb_bull = bb_compressed and ema_bull
+            bb_bear = bb_compressed and ema_bear
 
             # OBV trend: On-Balance Volume vs its MA
             vol_data = bd.history["volume"].values
@@ -155,10 +158,10 @@ class Strategy:
                 vol_bear = obv[-1] < obv_ma
 
             bull_votes = sum(
-                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_compressed, vol_bull]
+                [mom_bull, vshort_bull, ema_bull, rsi_bull, macd_bull, bb_bull, vol_bull]
             )
             bear_votes = sum(
-                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_compressed, vol_bear]
+                [mom_bear, vshort_bear, ema_bear, rsi_bear, macd_bear, bb_bear, vol_bear]
             )
 
             bullish = bull_votes >= MIN_VOTES
@@ -246,6 +249,7 @@ class Strategy:
                     self.atr_at_entry[symbol] = (
                         calc_atr(bd.history, ATR_LOOKBACK) or mid * 0.02
                     )
+                    self.exit_bar[symbol] = self.bar_count
 
         return signals
 

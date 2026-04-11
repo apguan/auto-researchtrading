@@ -13,6 +13,8 @@ logger = get_logger(__name__)
 # Time (seconds) to wait for exchange to settle a close before trusting its state
 CLOSE_SETTLE_SECONDS = 3.0
 
+_LIMIT_ENTRY_TIMEOUT_S = 30
+
 
 class ExecutionEngine:
     """Unified tick-level execution engine — always on.
@@ -63,6 +65,9 @@ class ExecutionEngine:
 
         # Symbols with in-flight entry orders (prevents duplicate opens)
         self._pending_orders: set = set()
+
+        # Pending limit entry orders: symbol -> {order_id, timestamp, side, size_coins, effective_direction, pending_dir}
+        self._pending_limit_entries: Dict[str, dict] = {}
 
         # Equity for position sizing (set by bot on bar close via set_equity)
         self._equity: float = 0.0
@@ -237,6 +242,31 @@ class ExecutionEngine:
             return await self._close_position(symbol, price, reason="signal_reversal")
 
         if current_size == 0:
+            if symbol in self._pending_limit_entries:
+                entry_info = self._pending_limit_entries[symbol]
+                elapsed = time.time() - entry_info["timestamp"]
+                if elapsed > _LIMIT_ENTRY_TIMEOUT_S:
+                    logger.info(
+                        "Limit entry timed out — cancelling",
+                        extra={
+                            "symbol": symbol,
+                            "order_id": entry_info["order_id"],
+                            "elapsed_s": round(elapsed, 1),
+                        },
+                    )
+                    try:
+                        await self.client.cancel_order(symbol, entry_info["order_id"])
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to cancel stale limit entry",
+                            extra={"symbol": symbol, "order_id": entry_info["order_id"], "error": str(e)},
+                        )
+                    del self._pending_limit_entries[symbol]
+                    if entry_info.get("pending_dir") is not None:
+                        self._pending_reversal.pop(symbol, None)
+                else:
+                    return None
+
             # Guard: skip if an entry order is already in-flight for this symbol
             if symbol in self._pending_orders:
                 return None
@@ -368,7 +398,8 @@ class ExecutionEngine:
                         symbol=symbol,
                         side=side,
                         size=round(size_coins, 8),
-                        order_type=OrderType.MARKET,
+                        order_type=OrderType.LIMIT,
+                        price=price,
                         reduce_only=False,
                     )
 
@@ -381,8 +412,27 @@ class ExecutionEngine:
                         self._last_executed_direction[symbol] = effective_direction
                         self.signal_state.entry_bar[symbol] = self.signal_state.bar_count
                         self._pending_reversal.pop(symbol, None)
-                    elif pending_dir is not None:
-                        self._pending_reversal.pop(symbol, None)
+                        self._pending_limit_entries.pop(symbol, None)
+                    elif order.status == OrderStatus.PENDING:
+                        self._pending_limit_entries[symbol] = {
+                            "order_id": order.id,
+                            "timestamp": time.time(),
+                            "side": side,
+                            "size_coins": size_coins,
+                            "effective_direction": effective_direction,
+                            "pending_dir": pending_dir,
+                        }
+                        logger.info(
+                            "Limit entry order pending",
+                            extra={"symbol": symbol, "order_id": order.id, "price": price},
+                        )
+                    else:
+                        if pending_dir is not None:
+                            self._pending_reversal.pop(symbol, None)
+                        logger.warning(
+                            "Limit entry order not filled",
+                            extra={"symbol": symbol, "status": order.status.value, "order_id": order.id},
+                        )
                 finally:
                     self._pending_orders.discard(symbol)
 
@@ -597,6 +647,7 @@ class ExecutionEngine:
                 )
                 if symbol not in self.signal_state.entry_bar:
                     self.signal_state.entry_bar[symbol] = max(0, self.signal_state.bar_count - self.settings.MIN_HOLD_BARS)
+                self._pending_limit_entries.pop(symbol, None)
             else:
                 if self._position_sizes.get(symbol, 0.0) > 0:
                     logger.info(
@@ -618,4 +669,5 @@ class ExecutionEngine:
         self._closing.clear()
         self._close_settling.clear()
         self._pending_orders.clear()
+        self._pending_limit_entries.clear()
         self._current_prices.clear()

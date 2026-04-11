@@ -134,3 +134,20 @@ class TestApplyDbParams:
         assert s.MAX_LEVERAGE == orig
         assert not hasattr(s, "NOT_A_REAL_PARAM")
 
+    def test_volume_filter_uses_full_liquidity_universe(self):
+        s = Settings(TRADING_PAIRS=["S00", "S01", "S10", "S11"])
+        db_overrides = {
+            "TRADING_PAIRS": ["S00", "S01", "S10", "S11"],
+        }
+
+        with patch(
+            "live_trading_bot.config.settings._load_active_db_params",
+            return_value=db_overrides,
+        ), patch(
+            "live_trading_bot.config.settings.discover_usdc_perps",
+            return_value=["S00", "S01", "S10", "S11"],
+        ) as mock_discover:
+            _apply_db_params(s)
+
+        mock_discover.assert_called_once_with(min_volume_24h=10_000_000, top_n=None)
+        assert s.TRADING_PAIRS == ["S00", "S01", "S10", "S11"]

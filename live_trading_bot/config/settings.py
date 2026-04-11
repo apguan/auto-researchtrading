@@ -286,6 +286,23 @@ def _apply_db_params(settings: Settings) -> None:
         settings.TRADING_PAIRS = trading_pairs
         settings.SYMBOL_WEIGHTS = make_equal_weights(trading_pairs)
 
+        try:
+            high_volume_symbols = set(
+                discover_usdc_perps(min_volume_24h=10_000_000, top_n=None)
+            )
+            before_count = len(settings.TRADING_PAIRS)
+            settings.TRADING_PAIRS = [s for s in settings.TRADING_PAIRS if s in high_volume_symbols]
+            filtered_count = before_count - len(settings.TRADING_PAIRS)
+            if filtered_count > 0:
+                from live_trading_bot.monitoring.logger import get_logger
+                get_logger(__name__).warning(
+                    "Filtered low-volume symbols from DB params",
+                    extra={"filtered_count": filtered_count, "remaining": len(settings.TRADING_PAIRS)},
+                )
+            settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
+        except Exception:
+            pass
+
 
 def get_settings() -> Settings:
     global _settings

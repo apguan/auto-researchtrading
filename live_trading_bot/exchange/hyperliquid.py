@@ -363,7 +363,7 @@ class HyperliquidClient:
                 status=OrderStatus.REJECTED,
             )
         is_buy = side == OrderSide.BUY
-        slippage = 0.05  # 5% slippage for market orders
+        slippage = 0.005  # 0.5% slippage for market orders
 
         if order_type == OrderType.MARKET:
             limit_px = self._exchange._slippage_price(symbol, is_buy, slippage, price)
