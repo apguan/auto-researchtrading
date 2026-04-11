@@ -33,6 +33,7 @@ class Trade:
     order_id: Optional[str] = None
     dry_run: bool = False
     snapshot_id: Optional[int] = None
+    wallet_address: Optional[str] = None
 
 
 @dataclass
