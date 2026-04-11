@@ -65,19 +65,16 @@ class Strategy:
         equity = portfolio.equity if portfolio.equity > 0 else portfolio.cash
         self.bar_count += 1
 
-        # Track the symbols present in this backtest
         if not self._symbols_initialized:
             _RUNTIME_SYMBOLS[:] = sorted(bar_data.keys())
             global _symbols_from_backtest
             _symbols_from_backtest = True
             self._symbols_initialized = True
         else:
-            # Accumulate any new symbols seen on later bars
             new = [s for s in bar_data if s not in _RUNTIME_SYMBOLS]
             if new:
                 _RUNTIME_SYMBOLS = sorted(_RUNTIME_SYMBOLS + new)
 
-        # --- Market regime pre-pass ---
         bullish_count = 0
         bearish_count = 0
         regime_total = 0
@@ -95,8 +92,8 @@ class Strategy:
             else:
                 bearish_count += 1
 
-        market_bullish = regime_total > 0 and (bullish_count / regime_total) >= REGIME_THRESHOLD
-        market_bearish = regime_total > 0 and (bearish_count / regime_total) >= REGIME_THRESHOLD
+        market_bullish = regime_total > 0 and bullish_count / regime_total >= REGIME_THRESHOLD
+        market_bearish = regime_total > 0 and bearish_count / regime_total >= REGIME_THRESHOLD
 
         for symbol, bd in bar_data.items():
             if (
@@ -139,7 +136,7 @@ class Strategy:
 
             # BB width: low percentile = compression = pending breakout
             bb_pctile = calc_bb_width_pctile(closes, BB_PERIOD)
-            bb_compressed = bb_pctile < 90  # Below 40th percentile = compressed
+            bb_compressed = bb_pctile < 90
 
             # OBV trend: On-Balance Volume vs its MA
             vol_data = bd.history["volume"].values
