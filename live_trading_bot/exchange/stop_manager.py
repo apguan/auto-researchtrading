@@ -137,8 +137,31 @@ class StopManager:
 
             atr = atrs.get(symbol, 0.0)
             if atr <= 0:
+                entry = pos.entry_price if pos.entry_price > 0 else pos.current_price
+                if entry <= 0:
+                    continue
+
+                existing = self._stops.get(symbol)
+                if existing:
+                    continue
+
+                fallback_pct = self.settings.EMERGENCY_EXIT_PCT
+                if pos.side.value == "long":
+                    stop_price = round(entry * (1 - fallback_pct), 2)
+                    side = OrderSide.SELL
+                else:
+                    stop_price = round(entry * (1 + fallback_pct), 2)
+                    side = OrderSide.BUY
+
+                await self.place_stop(symbol, side, pos.size, stop_price)
                 logger.warning(
-                    "Skipping stop refresh — no ATR", extra={"symbol": symbol}
+                    "Placed fallback stop for position with no ATR",
+                    extra={
+                        "symbol": symbol,
+                        "stop_price": stop_price,
+                        "side": side.value,
+                        "entry": entry,
+                    },
                 )
                 continue
 
