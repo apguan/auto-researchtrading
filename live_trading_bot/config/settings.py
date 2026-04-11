@@ -291,3 +291,17 @@ def get_settings() -> Settings:
         _settings = Settings.from_env()
     assert _settings is not None
     return _settings
+
+
+def refresh_db_params() -> None:
+    """Re-pull active strategy params from DB and apply to the singleton in-place.
+
+    Safe to call on every bar — if no DB or no active row, the existing
+    params are left untouched.  All 17+ components that hold ``self.settings``
+    via ``get_settings()`` share the same singleton object, so mutating it
+    here propagates instantly everywhere.
+    """
+    global _settings
+    if _settings is None:
+        return
+    _apply_db_params(_settings)

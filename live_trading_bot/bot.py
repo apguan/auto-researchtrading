@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
 from live_trading_bot.config import get_settings
-from live_trading_bot.config.settings import Settings
+from live_trading_bot.config.settings import Settings, refresh_db_params
 from live_trading_bot.exchange import create_exchange, Exchange
 from live_trading_bot.exchange.types import AccountState, Candle
 from live_trading_bot.data.streamer import DataStreamer
@@ -242,14 +242,14 @@ class TradingBot:
         if not self._running:
             return
 
-        # Dedup: with per-symbol callbacks, all symbols fire within the same
-        # bar interval (same timestamp). Only process once per unique bar.
         bar_ts = getattr(candle, "timestamp", 0)
         if bar_ts <= self._last_processed_bar_ts:
             return
         self._last_processed_bar_ts = bar_ts
 
         self._bar_count += 1
+
+        refresh_db_params()
 
         import time as _time
 
