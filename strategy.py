@@ -8,18 +8,22 @@ Changes from exp302 (score 16.145):
 
 import numpy as np
 from strategy_utils import ema, calc_rsi, calc_atr, calc_vol, calc_macd, calc_bb_width_pctile
-from prepare import Signal
-from constants import INTERVAL_SYMBOLS, make_equal_weights
+from strategy_types import Signal
+from constants import INTERVAL_SYMBOLS
 
-ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]
-SYMBOL_WEIGHTS = make_equal_weights(ACTIVE_SYMBOLS)
+ACTIVE_SYMBOLS = INTERVAL_SYMBOLS["1h"]  # fallback for _RUNTIME_SYMBOLS init; unused by on_bar
+
+# Populated on first on_bar() call with the symbols actually in bar_data.
+# Used by save_experiment_to_db() to persist the dynamic symbol set.
+_RUNTIME_SYMBOLS: list[str] = list(ACTIVE_SYMBOLS)
+_symbols_from_backtest = False
 
 SHORT_WINDOW = 6
 MED_WINDOW = 11
 MED2_WINDOW = 24
 LONG_WINDOW = 48
-EMA_FAST = 5
-EMA_SLOW = 20
+EMA_FAST = 3
+EMA_SLOW = 27
 RSI_PERIOD = 7
 RSI_BULL = 38
 RSI_BEAR = 62
@@ -43,6 +47,7 @@ BASE_THRESHOLD = 0.012
 
 COOLDOWN_BARS = 3
 MIN_VOTES = 5  # out of 7
+REGIME_THRESHOLD = 0.6  # fraction of symbols trending same direction to declare market regime
 
 
 class Strategy:
@@ -52,16 +57,48 @@ class Strategy:
         self.atr_at_entry = {}
         self.exit_bar = {}
         self.bar_count = 0
+        self._symbols_initialized = False
 
     def on_bar(self, bar_data, portfolio):
+        global _RUNTIME_SYMBOLS
         signals = []
         equity = portfolio.equity if portfolio.equity > 0 else portfolio.cash
         self.bar_count += 1
 
-        for symbol in ACTIVE_SYMBOLS:
-            if symbol not in bar_data:
+        # Track the symbols present in this backtest
+        if not self._symbols_initialized:
+            _RUNTIME_SYMBOLS[:] = sorted(bar_data.keys())
+            global _symbols_from_backtest
+            _symbols_from_backtest = True
+            self._symbols_initialized = True
+        else:
+            # Accumulate any new symbols seen on later bars
+            new = [s for s in bar_data if s not in _RUNTIME_SYMBOLS]
+            if new:
+                _RUNTIME_SYMBOLS = sorted(_RUNTIME_SYMBOLS + new)
+
+        # --- Market regime pre-pass ---
+        bullish_count = 0
+        bearish_count = 0
+        regime_total = 0
+
+        for _sym, _bd in bar_data.items():
+            _closes = _bd.history["close"].values
+            if len(_closes) < MED_WINDOW + 1:
                 continue
-            bd = bar_data[symbol]
+            if _bd.close <= 0 or _closes[-MED_WINDOW] <= 0:
+                continue
+            _ret = (_closes[-1] - _closes[-MED_WINDOW]) / max(_closes[-MED_WINDOW], 1e-10)
+            regime_total += 1
+            if _ret > 0:
+                bullish_count += 1
+            else:
+                bearish_count += 1
+
+        market_bullish = regime_total > 0 and (bullish_count / regime_total) >= REGIME_THRESHOLD
+        market_bearish = regime_total > 0 and (bearish_count / regime_total) >= REGIME_THRESHOLD
+
+        for symbol, bd in bar_data.items():
             if (
                 len(bd.history)
                 < max(LONG_WINDOW, EMA_SLOW, MACD_SLOW + MACD_SIGNAL + 5, BB_PERIOD * 3)
@@ -135,7 +172,7 @@ class Strategy:
             ) < COOLDOWN_BARS
 
             vol_scale = 1.0
-            weight = SYMBOL_WEIGHTS.get(symbol, 0.33)
+            weight = 1.0 / max(len(bar_data), 1)
             strength_scale = 1.0
             size = (
                 equity
@@ -150,9 +187,9 @@ class Strategy:
 
             if current_pos == 0:
                 if not in_cooldown:
-                    if bullish:
+                    if bullish and not market_bearish:
                         target = size
-                    elif bearish:
+                    elif bearish and not market_bullish:
                         target = -size
             else:
                 atr = calc_atr(bd.history, ATR_LOOKBACK)
@@ -187,9 +224,9 @@ class Strategy:
                     target = 0.0
 
                 if current_pos > 0 and bearish and not in_cooldown:
-                    target = -size
+                    target = -size if not market_bullish else current_pos
                 elif current_pos < 0 and bullish and not in_cooldown:
-                    target = size
+                    target = size if not market_bearish else current_pos
 
             if abs(target - current_pos) > 1.0:
                 signals.append(Signal(symbol=symbol, target_position=target))
@@ -240,6 +277,18 @@ def _get_current_params() -> dict[str, int | float]:
     return {k: globals()[k] for k in ACTIVE_PARAMS}
 
 
+def _get_runtime_symbols() -> list[str]:
+    if _symbols_from_backtest:
+        return _RUNTIME_SYMBOLS
+    from pathlib import Path
+    import glob
+    cache_dir = Path.home() / ".cache" / "autotrader" / "data"
+    parquets = sorted(glob.glob(str(cache_dir / "*_1h.parquet")))
+    if parquets:
+        return sorted(Path(p).stem.replace("_1h", "") for p in parquets)
+    return _RUNTIME_SYMBOLS
+
+
 def save_experiment_to_db(
     score: float,
     sharpe: float,
@@ -253,6 +302,7 @@ def save_experiment_to_db(
     is_best: bool = True,
 ) -> bool:
     import os
+    import sys
     import psycopg2
     from datetime import datetime, timezone
 
@@ -275,7 +325,7 @@ def save_experiment_to_db(
             "score, status, description, "
             + param_cols
         )
-        all_placeholders = ", ".join(["%s"] * (15 + len(ACTIVE_PARAMS)))
+        all_placeholders = ", ".join(["%s"] * (16 + len(ACTIVE_PARAMS)))
 
         ret_dd_ratio = (
             total_return_pct / max_drawdown_pct
@@ -286,8 +336,9 @@ def save_experiment_to_db(
             datetime.now(timezone.utc).isoformat(),
             "autoresearch",
             "1h",
-            "ALL",
+            ",".join(_get_runtime_symbols()),
             False,
+            is_best,
             sharpe,
             total_return_pct,
             max_drawdown_pct,
@@ -308,7 +359,8 @@ def save_experiment_to_db(
         )
         conn.commit()
         return True
-    except Exception:
+    except Exception as e:
+        print(f"save_experiment_to_db error: {e}", file=sys.stderr)
         return False
     finally:
         if conn:
@@ -328,7 +380,7 @@ def load_params_from_db() -> bool:
             with conn.cursor() as cur:
                 select_cols = ", ".join(ACTIVE_PARAMS)
                 cur.execute(
-                    f"SELECT {select_cols} "
+                    f"SELECT symbol, {select_cols} "
                     "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
                     "ORDER BY run_date DESC LIMIT 1"
                 )
@@ -336,13 +388,19 @@ def load_params_from_db() -> bool:
                 if not row:
                     return False
 
-                for name, val in zip(ACTIVE_PARAMS, row):
+                symbol_str = row[0]
+                for name, val in zip(ACTIVE_PARAMS, row[1:]):
                     if name in INT_PARAMS:
                         globals()[name] = int(val)
                     else:
                         globals()[name] = float(val)
 
-                print(f"Loaded 1h params from DB")
+                if symbol_str and symbol_str != "ALL":
+                    loaded_symbols = [s.strip() for s in symbol_str.split(",") if s.strip()]
+                    if loaded_symbols:
+                        globals()["ACTIVE_SYMBOLS"] = loaded_symbols
+
+                print(f"Loaded 1h params from DB (symbols: {symbol_str})")
                 return True
     except Exception:
         return False
