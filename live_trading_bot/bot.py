@@ -29,7 +29,7 @@ if str(_REPO_ROOT) not in sys.path:
 from strategy_utils import calc_atr
 
 from live_trading_bot.config import get_settings
-from live_trading_bot.config.settings import Settings
+from live_trading_bot.config.settings import Settings, refresh_db_params
 from live_trading_bot.exchange import create_exchange, Exchange
 from live_trading_bot.exchange.types import AccountState, Candle, OrderSide, OrderType
 from live_trading_bot.data.streamer import DataStreamer
@@ -41,6 +41,7 @@ from live_trading_bot.storage.models import Trade, SignalRecord
 from live_trading_bot.monitoring.logger import setup_logger, get_logger
 from live_trading_bot.monitoring.alerts import Alerter
 from live_trading_bot.monitoring.metrics import MetricsTracker
+from live_trading_bot.monitoring.telegram_bot import TelegramCommandBot
 from live_trading_bot.execution.signal_state import SignalState
 from live_trading_bot.execution.execution_engine import ExecutionEngine
 from live_trading_bot.exchange.stop_manager import StopManager
@@ -66,6 +67,7 @@ class TradingBot:
         self.execution_engine: Optional[ExecutionEngine] = None
         self.stop_manager: Optional[StopManager] = None
         self.watchdog: Optional[Watchdog] = None
+        self.command_bot: Optional[TelegramCommandBot] = None
 
         self._running = False
         self._shutdown_event = asyncio.Event()
@@ -186,6 +188,14 @@ class TradingBot:
         if self.watchdog:
             await self.watchdog.start()
 
+        self.command_bot = TelegramCommandBot(
+            alerter=self.alerter,
+            metrics=self.metrics,
+            client=self.client,
+            db=self.db,
+        )
+        await self.command_bot.start()
+
         logger.info(
             "Bot initialized",
             extra={
@@ -229,14 +239,14 @@ class TradingBot:
         if not self._running:
             return
 
-        # Dedup: with per-symbol callbacks, all symbols fire within the same
-        # bar interval (same timestamp). Only process once per unique bar.
         bar_ts = getattr(candle, "timestamp", 0)
         if bar_ts <= self._last_processed_bar_ts:
             return
         self._last_processed_bar_ts = bar_ts
 
         self._bar_count += 1
+
+        refresh_db_params()
 
         now = time.time()
         if now - self._last_heartbeat >= 600:
@@ -457,6 +467,7 @@ class TradingBot:
                 pnl=pnl,
                 order_id=order.id,
                 dry_run=self.settings.DRY_RUN,
+                snapshot_id=self.settings.active_snapshot_id,
             )
         )
 
@@ -568,6 +579,9 @@ class TradingBot:
 
         if self.watchdog:
             await self.watchdog.stop()
+
+        if self.command_bot:
+            await self.command_bot.stop()
 
         # Stops are NOT cancelled here — they are reduce-only safety nets that
         # protect positions during restarts.  On next startup,

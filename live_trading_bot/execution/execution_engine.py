@@ -249,8 +249,13 @@ class ExecutionEngine:
                 effective_direction = target_direction
 
             if effective_direction != 0:
-                # Bar-based cooldown — applies to all entries including pending reversals
-                if self.signal_state.is_in_cooldown(
+                # Bar-based cooldown — applies to FRESH entries only. Pending
+                # reversals bypass cooldown because the bot already committed
+                # to the flip when it closed the prior position; the cooldown's
+                # purpose (debouncing oscillation between flat and entries)
+                # does not apply to the second half of an explicit flip.
+                # See execution_engine.py:217 ("re-enter on next tick").
+                if pending_dir is None and self.signal_state.is_in_cooldown(
                     symbol, self.settings.COOLDOWN_BARS
                 ):
                     logger.debug(

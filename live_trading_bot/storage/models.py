@@ -32,6 +32,7 @@ class Trade:
     strategy_signal: Optional[str] = None
     order_id: Optional[str] = None
     dry_run: bool = False
+    snapshot_id: Optional[int] = None
 
 
 @dataclass

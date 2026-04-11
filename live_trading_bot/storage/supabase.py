@@ -46,8 +46,8 @@ class SupabaseRepository:
     async def insert_trade(self, trade: Trade) -> int:
         row = await self.pool.fetchrow(
             """
-            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO trades (timestamp, symbol, side, size, price, fee, pnl, strategy_signal, order_id, dry_run, snapshot_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id
             """,
             trade.timestamp,
@@ -60,6 +60,7 @@ class SupabaseRepository:
             trade.strategy_signal,
             trade.order_id,
             trade.dry_run,
+            trade.snapshot_id,
         )
         trade_id = row["id"]
         logger.debug(
@@ -111,6 +112,7 @@ class SupabaseRepository:
                 strategy_signal=row["strategy_signal"],
                 order_id=row["order_id"],
                 dry_run=bool(row.get("dry_run", False)),
+                snapshot_id=row.get("snapshot_id"),
             )
             for row in rows
         ]

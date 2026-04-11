@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
 import sys
 from pathlib import Path
@@ -33,7 +33,7 @@ def _load_active_db_params() -> dict[str, int | float | list[str]]:
             with conn.cursor() as cur:
                 select_cols = ", ".join(PARAM_COLUMNS)
                 cur.execute(
-                    f"SELECT symbol, {select_cols} "
+                    f"SELECT id, symbol, {select_cols} "
                     "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
                     "ORDER BY run_date DESC LIMIT 1"
                 )
@@ -41,9 +41,10 @@ def _load_active_db_params() -> dict[str, int | float | list[str]]:
                 if not row:
                     return {}
 
-                symbol_str = row[0]
                 params: dict[str, int | float | list[str]] = {}
-                for name, val in zip(PARAM_COLUMNS, row[1:]):
+                params["active_snapshot_id"] = int(row[0])
+                symbol_str = row[1]
+                for name, val in zip(PARAM_COLUMNS, row[2:]):
                     if name in _INT_PARAMS:
                         params[name] = int(val)
                     else:
@@ -121,6 +122,9 @@ class Settings:
     # wallet (which doesn't hold equity itself). If unset, defaults to the
     # address derived from the private key (correct when the PK is the main wallet's).
     HYPERLIQUID_MAIN_WALLET: str = ""
+    # Vault/sub-account address. When set, orders are placed on behalf of this
+    # vault and account state (positions, equity, fills) is queried from it.
+    HYPERLIQUID_VAULT_ADDRESS: str = ""
 
     DB_PATH: str = "trading_bot.db"
     SUPABASE_DB_URL: str = ""
@@ -136,6 +140,7 @@ class Settings:
     DRY_RUN: bool = False
     DRY_RUN_INITIAL_CAPITAL: float = 10_000.0
     DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
+    active_snapshot_id: Optional[int] = None
 
     ENTRY_SLIPPAGE_PCT: float = 0.02
     EXECUTION_COOLDOWN_MS: int = 5000
@@ -161,7 +166,7 @@ class Settings:
         if val := os.getenv("TRADING_PAIRS"):
             settings.TRADING_PAIRS = val.split(",")
         else:
-            settings.TRADING_PAIRS = discover_usdc_perps()
+            settings.TRADING_PAIRS = discover_usdc_perps(top_n=None)
         settings.SYMBOL_WEIGHTS = make_equal_weights(settings.TRADING_PAIRS)
 
         if val := os.getenv("MAX_LEVERAGE"):
@@ -184,6 +189,9 @@ class Settings:
 
         if val := os.getenv("HYPERLIQUID_MAIN_WALLET"):
             settings.HYPERLIQUID_MAIN_WALLET = val
+
+        if val := os.getenv("HYPERLIQUID_VAULT_ADDRESS"):
+            settings.HYPERLIQUID_VAULT_ADDRESS = val
 
         if val := os.getenv("DRY_RUN"):
             settings.DRY_RUN = val.lower() in ("true", "1", "yes")
@@ -285,3 +293,17 @@ def get_settings() -> Settings:
         _settings = Settings.from_env()
     assert _settings is not None
     return _settings
+
+
+def refresh_db_params() -> None:
+    """Re-pull active strategy params from DB and apply to the singleton in-place.
+
+    Safe to call on every bar — if no DB or no active row, the existing
+    params are left untouched.  All 17+ components that hold ``self.settings``
+    via ``get_settings()`` share the same singleton object, so mutating it
+    here propagates instantly everywhere.
+    """
+    global _settings
+    if _settings is None:
+        return
+    _apply_db_params(_settings)

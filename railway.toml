@@ -7,7 +7,7 @@
 # competed with trading-bot for the same Hyperliquid account.
 #
 # Current services and the start commands they SHOULD have:
-#   - trading-bot → uv run live_trading_bot/harness/side_by_side.py --interval 15m --dry-runs 1 --live-runs 1
+#   - trading-bot → uv run live_trading_bot/harness/side_by_side.py --dry-runs 1 --live-runs 1
 #   - daily-cron  → uv run data_pipeline/daily_tune.py --workers 4 --subsample 4
 #
 # The Dockerfile also has no default CMD, so a service with no custom Start
