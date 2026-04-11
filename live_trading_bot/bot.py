@@ -472,6 +472,7 @@ class TradingBot:
                 pnl=pnl,
                 order_id=order.id,
                 dry_run=self.settings.DRY_RUN,
+                snapshot_id=self.settings.active_snapshot_id,
             )
         )
 

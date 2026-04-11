@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
 import sys
 from pathlib import Path
@@ -33,7 +33,7 @@ def _load_active_db_params() -> dict[str, int | float | list[str]]:
             with conn.cursor() as cur:
                 select_cols = ", ".join(PARAM_COLUMNS)
                 cur.execute(
-                    f"SELECT symbol, {select_cols} "
+                    f"SELECT id, symbol, {select_cols} "
                     "FROM param_snapshots WHERE is_active = TRUE AND period = '1h' "
                     "ORDER BY run_date DESC LIMIT 1"
                 )
@@ -41,9 +41,10 @@ def _load_active_db_params() -> dict[str, int | float | list[str]]:
                 if not row:
                     return {}
 
-                symbol_str = row[0]
                 params: dict[str, int | float | list[str]] = {}
-                for name, val in zip(PARAM_COLUMNS, row[1:]):
+                params["active_snapshot_id"] = int(row[0])
+                symbol_str = row[1]
+                for name, val in zip(PARAM_COLUMNS, row[2:]):
                     if name in _INT_PARAMS:
                         params[name] = int(val)
                     else:
@@ -139,6 +140,7 @@ class Settings:
     DRY_RUN: bool = False
     DRY_RUN_INITIAL_CAPITAL: float = 10_000.0
     DRY_RUN_STATE_PATH: str = "/tmp/dry_run_state.json"
+    active_snapshot_id: Optional[int] = None
 
     ENTRY_SLIPPAGE_PCT: float = 0.02
     EXECUTION_COOLDOWN_MS: int = 5000
