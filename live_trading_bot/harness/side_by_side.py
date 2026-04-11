@@ -435,7 +435,7 @@ def main():
                     else:
                         sigs = extract_signals(inst["db_path"])
                         trades = extract_trades(inst["db_path"])
-                    last = sigs[-1]["timestamp"][11:16] if sigs else "--:--"
+                    last = str(sigs[-1]["timestamp"])[11:16] if sigs else "--:--"
                     counts.append(f"{inst['name']}={len(sigs)}sig/{len(trades)}trd(last:{last})")
                 print(f"  [{mins}m{secs:02d}s] {', '.join(counts)}", flush=True)
     except KeyboardInterrupt:
