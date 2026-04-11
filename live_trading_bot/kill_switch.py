@@ -26,7 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from live_trading_bot.config import get_private_key, get_settings  # noqa: E402
+from live_trading_bot.config import get_settings  # noqa: E402
 from live_trading_bot.exchange import (  # noqa: E402
     OrderSide,
     OrderType,
@@ -37,6 +37,7 @@ from live_trading_bot.storage import (  # noqa: E402
     Trade,
     create_repository,
 )
+from live_trading_bot.storage.models import RiskEventType  # noqa: E402
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -220,7 +221,7 @@ async def _close_positions(client, positions: dict, is_dry_run: bool) -> list[di
             )
         except Exception as err:
             print(f"  [error] {sym}: close failed — {err}")
-            print(f"  Continuing with remaining positions...")
+            print("  Continuing with remaining positions...")
 
     return results
 
@@ -234,6 +235,7 @@ async def _record_to_db(
 ) -> None:
     """Insert Trade and RiskEvent records into the database."""
     await db.connect()
+    settings = get_settings()
 
     for r in results:
         await db.insert_trade(
@@ -249,8 +251,7 @@ async def _record_to_db(
                 strategy_signal="kill_switch",
                 order_id=r["order_id"],
                 dry_run=is_dry_run,
-                snapshot_id=get_settings().active_snapshot_id,
-                wallet_address=get_settings().query_address,
+                snapshot_id=settings.active_snapshot_id,
             )
         )
 
@@ -259,8 +260,11 @@ async def _record_to_db(
         RiskEvent(
             id=None,
             timestamp=datetime.now(timezone.utc),
-            event_type="manual_kill_switch",
-            details=f"Killed {len(results)} positions: {', '.join(closed_symbols)}",
+            event_type=RiskEventType.MANUAL_KILL_SWITCH.value,
+            details=(
+                f"Killed {len(results)} positions for {wallet_address}: "
+                f"{', '.join(closed_symbols)} | equity=${equity:,.2f}"
+            ),
             action_taken="all_positions_closed",
         )
     )
