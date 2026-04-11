@@ -224,9 +224,9 @@ class Strategy:
                     target = 0.0
 
                 if current_pos > 0 and bearish and not in_cooldown:
-                    target = -size if not market_bullish else current_pos
+                    target = -size if not market_bullish else 0
                 elif current_pos < 0 and bullish and not in_cooldown:
-                    target = size if not market_bearish else current_pos
+                    target = size if not market_bearish else 0
 
             if abs(target - current_pos) > 1.0:
                 signals.append(Signal(symbol=symbol, target_position=target))

@@ -10,6 +10,9 @@ from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Time (seconds) to wait for exchange to settle a close before trusting its state
+CLOSE_SETTLE_SECONDS = 3.0
+
 
 class ExecutionEngine:
     """Unified tick-level execution engine — always on.
@@ -56,6 +59,7 @@ class ExecutionEngine:
 
         # Symbols currently in the process of closing (prevent sync_positions re-hydrating)
         self._closing: set = set()
+        self._close_settling: Dict[str, float] = {}
 
         # Symbols with in-flight entry orders (prevents duplicate opens)
         self._pending_orders: set = set()
@@ -525,6 +529,7 @@ class ExecutionEngine:
             self._position_sizes[symbol] = 0.0
             self._entry_prices[symbol] = 0.0
             self._last_executed_direction[symbol] = 0
+            self._close_settling[symbol] = time.time()
 
             # Reset peak/trough for fresh start on re-entry.
             # Do NOT clear direction — it persists from hourly bar close.
@@ -550,6 +555,7 @@ class ExecutionEngine:
             # Close failed after retry — preserve position tracking to prevent
             # doubling exposure. sync_positions on next bar will reconcile with
             # exchange state.
+            self._close_settling.pop(symbol, None)
             logger.critical(
                 "Close order failed after retry — position tracking preserved "
                 "(position may still be open on exchange)",
@@ -573,6 +579,12 @@ class ExecutionEngine:
         for symbol in self.symbols:
             if symbol in self._closing:
                 continue
+            if symbol in self._close_settling:
+                settling_time = self._close_settling[symbol]
+                if time.time() - settling_time < CLOSE_SETTLE_SECONDS:
+                    continue
+                else:
+                    del self._close_settling[symbol]
             pos = account_state.positions.get(symbol)
             if pos and pos.size > 0:
                 self._position_sizes[symbol] = pos.size
@@ -604,5 +616,6 @@ class ExecutionEngine:
         self._pending_reversal.clear()
         self._pending_close_info.clear()
         self._closing.clear()
+        self._close_settling.clear()
         self._pending_orders.clear()
         self._current_prices.clear()
