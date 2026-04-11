@@ -104,7 +104,7 @@ async def test_full_tick_execution_cycle(settings, signal_state, mock_client):
     """
     engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
     engine.set_equity(100000.0)
-    stop_manager = StopManager(mock_client, settings)
+    stop_manager = StopManager(mock_client, settings, signal_state=signal_state)
 
     async def on_closed(symbol: str):
         await stop_manager.cancel_stop(symbol)
@@ -189,7 +189,7 @@ async def test_startup_reconciliation_orphaned_position(
 
     engine = ExecutionEngine(signal_state, mock_client, settings, ["BTC"])
     engine.set_equity(100000.0)
-    stop_manager = StopManager(mock_client, settings)
+    stop_manager = StopManager(mock_client, settings, signal_state=signal_state)
 
     assert engine._position_sizes.get("BTC", 0.0) == 0.0
     assert engine._entry_prices.get("BTC", 0.0) == 0.0

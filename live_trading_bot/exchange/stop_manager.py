@@ -1,8 +1,12 @@
-from typing import Dict, Optional, Set
+from __future__ import annotations
+from typing import TYPE_CHECKING, Dict, Optional, Set
 from .types import Order, OrderSide, OrderStatus, OrderType, Position
 from .interface import Exchange
 from ..config.settings import Settings
 from ..monitoring.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..execution.signal_state import SignalState
 
 logger = get_logger(__name__)
 
@@ -10,9 +14,15 @@ logger = get_logger(__name__)
 class StopManager:
     """Manages exchange-side stop-market orders as a safety net."""
 
-    def __init__(self, client: Exchange, settings: Settings):
+    def __init__(
+        self,
+        client: Exchange,
+        settings: Settings,
+        signal_state: Optional[SignalState] = None,
+    ):
         self.client = client
         self.settings = settings
+        self.signal_state = signal_state
         self._stops: Dict[str, Order] = {}  # symbol -> placed stop order
 
     async def load_existing_stops(self, position_symbols: Set[str]) -> int:
@@ -171,23 +181,44 @@ class StopManager:
             if entry <= 0:
                 continue
 
-            # For longs: stop below entry. For shorts: stop above entry.
-            # Use simple fixed-distance stop from entry (not trailing)
-            # since we can't track peaks/troughs on the exchange.
             atr_stop_mult = self.settings.ATR_STOP_MULT
             stop_distance = atr * atr_stop_mult * widening_mult
-            if pos.side.value == "long":
-                stop_price = round(entry - stop_distance, 2)
+            is_long = pos.side.value == "long"
+
+            if self.signal_state is not None:
+                peak = self.signal_state.peak_prices.get(symbol, entry)
+                trough = self.signal_state.trough_prices.get(symbol, entry)
+            else:
+                peak = entry
+                trough = entry
+
+            if is_long:
+                stop_price = round(peak - stop_distance, 2)
                 side = OrderSide.SELL
             else:
-                stop_price = round(entry + stop_distance, 2)
+                stop_price = round(trough + stop_distance, 2)
                 side = OrderSide.BUY
 
-            # Only refresh if stop price changed significantly (>1%)
             existing = self._stops.get(symbol)
             if existing and existing.price:
+                if is_long and stop_price < existing.price:
+                    continue
+                if not is_long and stop_price > existing.price:
+                    continue
                 if abs(existing.price - stop_price) / stop_price < 0.01:
                     continue
+
+                anchor = peak if is_long else trough
+                direction = "up" if is_long else "down"
+                logger.info(
+                    f"Trailing stop {direction}",
+                    extra={
+                        "symbol": symbol,
+                        "old_stop": existing.price,
+                        "new_stop": stop_price,
+                        "anchor": anchor,
+                    },
+                )
 
             await self.place_stop(symbol, side, pos.size, stop_price)
 

@@ -130,7 +130,7 @@ class TradingBot:
             risk_controller=self.risk_controller,
             position_limiter=self.position_limiter,
         )
-        self.stop_manager = StopManager(self.client, self.settings)
+        self.stop_manager = StopManager(self.client, self.settings, signal_state=self.signal_state)
         self.watchdog = Watchdog(self.settings, self.client, self.alerter)
         self.execution_engine.on_position_closed = self._on_execution_position_closed
 
